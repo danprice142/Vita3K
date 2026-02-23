@@ -15,7 +15,9 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+#ifndef BUILD_LIBRETRO
 #include <motion/event_handler.h>
+#endif
 #include <motion/functions.h>
 #include <motion/state.h>
 
@@ -23,10 +25,30 @@
 
 #include <util/log.h>
 
+#ifndef BUILD_LIBRETRO
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_sensor.h>
+#endif
 
 #include <numbers>
+
+#ifdef BUILD_LIBRETRO
+#include <libretro_input_state.h>
+
+void MotionState::init() {
+    auto &inp = libretro_input_state();
+    has_device_motion_support = inp.has_motion;
+}
+
+void MotionState::stop_sensor_sampling() {
+    is_sampling = false;
+}
+
+void MotionState::start_sensor_sampling() {
+    is_sampling = true;
+}
+
+#else // !BUILD_LIBRETRO
 
 enum DeviceRotation : int32_t {
     ROTATION_UNKNOWN = -1,
@@ -166,6 +188,7 @@ void MotionState::start_sensor_sampling() {
         stop_sensor_sampling();
     }
 }
+#endif
 
 SceFVector3 get_acceleration(const MotionState &state) {
     Util::Vec3f accelerometer = state.motion_data.GetAcceleration();
@@ -229,13 +252,45 @@ SceFVector3 get_basic_orientation(const MotionState &state) {
     return state.motion_data.GetBasicOrientation();
 }
 
+static uint64_t last_updated_gyro_timestamp = 0;
+static uint64_t last_updated_accel_timestamp = 0;
+
 constexpr uint64_t to_microseconds(uint64_t ns) {
     return ns / 1000;
 }
 
-static uint64_t last_updated_gyro_timestamp = 0;
-static uint64_t last_updated_accel_timestamp = 0;
+#ifdef BUILD_LIBRETRO
+// Feed libretro sensor data into MotionInput — called from refresh_motion
+void libretro_update_motion(MotionState &state, CtrlState &ctrl_state) {
+    if (!state.is_sampling)
+        return;
 
+    auto &inp = libretro_input_state();
+    if (!inp.has_motion || !inp.motion_enabled)
+        return;
+
+    state.has_device_motion_support = true;
+    ctrl_state.has_motion_support = true;
+
+    float ax, ay, az, gx, gy, gz;
+    {
+        std::lock_guard<std::mutex> lock(inp.mutex);
+        ax = inp.accel_x; ay = inp.accel_y; az = inp.accel_z;
+        gx = inp.gyro_x;  gy = inp.gyro_y;  gz = inp.gyro_z;
+    }
+
+    uint64_t timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+
+    state.motion_data.SetAcceleration({ ax, ay, az });
+    state.motion_data.SetGyroscope({ gx, gy, gz });
+
+    last_updated_accel_timestamp = timestamp;
+    last_updated_gyro_timestamp = timestamp;
+}
+#endif // BUILD_LIBRETRO
+
+#ifndef BUILD_LIBRETRO
 template <typename SensorEvent>
 static void handle_motion_event(EmuEnvState &emuenv, int32_t sensor_type, const SensorEvent &sensor) {
     if (!emuenv.motion.is_sampling)
@@ -292,10 +347,15 @@ void handle_motion_event(EmuEnvState &emuenv, int32_t sensor_type, const SDL_Sen
 void handle_motion_event(EmuEnvState &emuenv, int32_t sensor_type, const SDL_GamepadSensorEvent &sensor) {
     handle_motion_event<SDL_GamepadSensorEvent>(emuenv, sensor_type, sensor);
 }
+#endif // !BUILD_LIBRETRO
 
 void refresh_motion(MotionState &state, CtrlState &ctrl_state) {
     if (!state.is_sampling)
         return;
+
+#ifdef BUILD_LIBRETRO
+    libretro_update_motion(state, ctrl_state);
+#endif
 
     if (!ctrl_state.has_motion_support && !state.has_device_motion_support)
         return;

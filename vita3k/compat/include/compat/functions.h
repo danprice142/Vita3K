@@ -18,11 +18,15 @@
 #pragma once
 
 #include <emuenv/state.h>
+#ifndef BUILD_LIBRETRO
 #include <gui/state.h>
+#endif
 
 namespace compat {
 
+#ifndef BUILD_LIBRETRO
 bool load_app_compat_db(GuiState &gui, EmuEnvState &emuenv);
 bool update_app_compat_db(GuiState &gui, EmuEnvState &emuenv);
+#endif
 
 } // namespace compat

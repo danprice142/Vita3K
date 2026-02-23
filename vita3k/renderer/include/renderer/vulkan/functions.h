@@ -24,7 +24,11 @@ struct MemState;
 
 namespace renderer::vulkan {
 
+#ifdef BUILD_LIBRETRO
+bool create(std::unique_ptr<renderer::State> &state, const Config &config);
+#else
 bool create(SDL_Window *window, std::unique_ptr<renderer::State> &state, const Config &config);
+#endif
 
 bool create(VKState &state, std::unique_ptr<Context> &context, MemState &mem);
 bool create(VKState &state, std::unique_ptr<RenderTarget> &rt, const SceGxmRenderTargetParams &params, const FeatureState &features);

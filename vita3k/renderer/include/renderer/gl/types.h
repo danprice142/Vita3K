@@ -30,9 +30,12 @@
 #include <memory>
 #include <vector>
 
+#ifdef BUILD_LIBRETRO
+typedef void *GLContextPtr;
+#else
 typedef struct SDL_GLContextState *SDL_GLContext;
-
 typedef std::unique_ptr<SDL_GLContextState, std::function<void(SDL_GLContext)>> GLContextPtr;
+#endif
 
 struct SceGxmProgramParameter;
 

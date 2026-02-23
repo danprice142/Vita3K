@@ -5,12 +5,16 @@
 #include <vector>
 
 std::vector<SceFVector2> get_touchpad_fingers_pos(SceTouchPortType &port);
+#ifndef BUILD_LIBRETRO
 int handle_touchpad_event(SDL_GamepadTouchpadEvent &touchpad);
+#endif
 void touch_vsync_update(const EmuEnvState &emuenv);
 void pinch_modifier(bool isHold);
 void pinch_move(float velocity);
 void pinch_automove(float velocity);
+#ifndef BUILD_LIBRETRO
 int handle_touch_event(SDL_TouchFingerEvent &finger);
+#endif
 int toggle_touchscreen();
 int touch_get(const SceUID thread_id, EmuEnvState &emuenv, const SceUInt32 &port, SceTouchData *pData, SceUInt32 count, bool is_peek);
 void touch_set_force_mode(int port, bool mode);

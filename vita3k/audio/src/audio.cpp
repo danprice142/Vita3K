@@ -18,7 +18,11 @@
 #include <audio/state.h>
 
 #include <audio/impl/cubeb_audio.h>
+#ifdef BUILD_LIBRETRO
+#include <audio/impl/libretro_audio.h>
+#else
 #include <audio/impl/sdl_audio.h>
+#endif
 
 #include <kernel/thread/thread_state.h>
 
@@ -45,6 +49,16 @@ void AudioState::set_backend(const std::string &adapter_name) {
     // first delete all ports then delete the backend
     out_ports.clear();
     adapter.reset();
+#ifdef BUILD_LIBRETRO
+    if (adapter_name == "Libretro") {
+        adapter = std::make_unique<LibretroAudioAdapter>(*this);
+    } else if (adapter_name == "Cubeb") {
+        adapter = std::make_unique<CubebAudioAdapter>(*this);
+    } else {
+        LOG_ERROR("Unknown audio adapter {}", adapter_name);
+        return;
+    }
+#else
     if (adapter_name == "SDL") {
         adapter = std::make_unique<SDLAudioAdapter>(*this);
     } else if (adapter_name == "Cubeb") {
@@ -53,6 +67,7 @@ void AudioState::set_backend(const std::string &adapter_name) {
         LOG_ERROR("Unknown audio adapter {}", adapter_name);
         return;
     }
+#endif
     this->audio_backend = adapter_name;
 
     // lock the mutex to make sure nothing happens until the initialisation is done

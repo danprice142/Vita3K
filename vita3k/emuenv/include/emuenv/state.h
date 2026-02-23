@@ -57,7 +57,9 @@ struct Ime;
 struct License;
 struct RegMgrState;
 struct SfoFile;
+#ifndef BUILD_LIBRETRO
 struct GDBState;
+#endif
 struct HTTPState;
 struct CameraState;
 
@@ -103,7 +105,9 @@ private:
     std::unique_ptr<License> _license;
     std::unique_ptr<RegMgrState> _regmgr;
     std::unique_ptr<SfoFile> _sfo_handle;
+#ifndef BUILD_LIBRETRO
     std::unique_ptr<GDBState> _gdb;
+#endif
     std::unique_ptr<HTTPState> _http;
     std::unique_ptr<CameraState> _camera;
 
@@ -141,7 +145,11 @@ public:
     float fps_values[20] = {};
     uint32_t current_fps_offset = 0;
     uint32_t ms_per_frame = 0;
+#ifdef BUILD_LIBRETRO
+    WindowPtr window = nullptr;
+#else
     WindowPtr window = WindowPtr(nullptr, nullptr);
+#endif
     renderer::Backend backend_renderer{};
     RendererPtr renderer{};
     IVector2 drawable_size = { 0, 0 };
@@ -174,7 +182,9 @@ public:
     float system_dpi_scale = 1.f;
     float manual_dpi_scale = 1.f;
     FVector2 gui_scale = { 1.f, 1.f };
+#ifndef BUILD_LIBRETRO
     GDBState &gdb;
+#endif
     HTTPState &http;
     CameraState &camera;
     int max_font_level = 0;

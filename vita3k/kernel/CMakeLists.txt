@@ -28,7 +28,11 @@ add_library(
 
 target_include_directories(kernel PUBLIC include)
 target_link_libraries(kernel PUBLIC rtc cpu mem util nids)
-target_link_libraries(kernel PRIVATE patch SDL3::SDL3 miniz vita-toolchain)
+if(BUILD_LIBRETRO)
+	target_link_libraries(kernel PRIVATE patch miniz vita-toolchain)
+else()
+	target_link_libraries(kernel PRIVATE patch SDL3::SDL3 miniz vita-toolchain)
+endif()
 if(TRACY_ENABLE_ON_CORE_COMPONENTS)
 	target_link_libraries(kernel PRIVATE tracy)
 endif()

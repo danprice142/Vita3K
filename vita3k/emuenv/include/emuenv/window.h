@@ -19,10 +19,16 @@
 
 #include <memory>
 
+#ifndef BUILD_LIBRETRO
 struct SDL_Window;
+#endif
 namespace renderer {
 struct State;
 }
 
+#ifdef BUILD_LIBRETRO
+typedef void *WindowPtr;
+#else
 typedef std::unique_ptr<SDL_Window, void (*)(SDL_Window *)> WindowPtr;
+#endif
 typedef std::unique_ptr<renderer::State> RendererPtr;

@@ -33,7 +33,9 @@
 #include <util/log.h>
 #include <vkutil/vkutil.h>
 
+#ifndef BUILD_LIBRETRO
 #include <SDL3/SDL_vulkan.h>
+#endif
 
 #ifdef __APPLE__
 #include <MoltenVK/mvk_vulkan.h>
@@ -147,6 +149,26 @@ const static std::vector<const char *> required_device_extensions = {
     // needed in order to use negative viewport height
     vk::KHRMaintenance1ExtensionName
 };
+
+#ifdef BUILD_LIBRETRO
+static LibretroVulkanHandles s_libretro_vk_handles;
+
+void set_libretro_vulkan_handles(const LibretroVulkanHandles &handles) {
+    s_libretro_vk_handles = handles;
+}
+
+const LibretroVulkanHandles &get_libretro_vulkan_handles() {
+    return s_libretro_vk_handles;
+}
+
+void set_libretro_queue_lock(renderer::State *state, void *handle,
+    void (*lock_queue)(void *), void (*unlock_queue)(void *)) {
+    auto *vk_state = static_cast<renderer::vulkan::VKState *>(state);
+    vk_state->libretro_queue_handle = handle;
+    vk_state->libretro_lock_queue = lock_queue;
+    vk_state->libretro_unlock_queue = unlock_queue;
+}
+#endif
 
 namespace renderer::vulkan {
 
@@ -277,11 +299,17 @@ static std::string get_driver_version(uint32_t vendor_id, uint32_t version_raw) 
     return fmt::format("{}.{}.{}", (version_raw >> 22) & 0x3ff, (version_raw >> 12) & 0x3ff, version_raw & 0xfff);
 }
 
+#ifdef BUILD_LIBRETRO
+bool create(std::unique_ptr<renderer::State> &state, const Config &config) {
+    auto &vk_state = dynamic_cast<VKState &>(*state);
+    return vk_state.create(state, config);
+}
+#else
 bool create(SDL_Window *window, std::unique_ptr<renderer::State> &state, const Config &config) {
     auto &vk_state = dynamic_cast<VKState &>(*state);
-
     return vk_state.create(window, state, config);
 }
+#endif
 
 VKState::VKState(int gpu_idx)
     : gpu_idx(gpu_idx)
@@ -373,6 +401,239 @@ static void *load_custom_adreno_driver(const std::string &driver_name) {
 }
 #endif
 
+#ifdef BUILD_LIBRETRO
+void VKState::locked_queue_submit(vk::Queue queue, const vk::SubmitInfo &submit_info, vk::Fence fence) {
+    static uint64_t submit_counter = 0;
+    submit_counter++;
+    if (submit_counter <= 5 || submit_counter % 500 == 0)
+        LOG_INFO("locked_queue_submit #{}: lock={} handle={} cmdbufs={}", submit_counter,
+            (void*)libretro_lock_queue, libretro_queue_handle, submit_info.commandBufferCount);
+    if (libretro_lock_queue && libretro_queue_handle) {
+        libretro_lock_queue(libretro_queue_handle);
+        queue.submit(submit_info, fence);
+        libretro_unlock_queue(libretro_queue_handle);
+    } else {
+        queue.submit(submit_info, fence);
+    }
+}
+
+bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &config) {
+    const auto &lr_handles = get_libretro_vulkan_handles();
+
+    // Check if the frontend has provided Vulkan handles (context_reset was called)
+    if (!lr_handles.instance || !lr_handles.device || !lr_handles.gpu || !lr_handles.queue) {
+        // Deferred mode: HW context not ready yet. Just set basic state.
+        LOG_INFO("VKState::create (libretro — deferred Vulkan init, no HW context yet)");
+        this->res_multiplier = static_cast<float>(config.resolution_multiplier);
+        this->disable_surface_sync = config.current_config.disable_surface_sync;
+        return true;
+    }
+
+    LOG_INFO("VKState::create (libretro — initializing with frontend's Vulkan device)");
+    libretro_device_external = true;
+
+    // Initialize the Vulkan HPP dispatcher with frontend's function poaders
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(lr_handles.get_instance_proc_addr);
+    instance = vk::Instance(lr_handles.instance);
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(instance);
+    physical_device = vk::PhysicalDevice(lr_handles.gpu);
+    device = vk::Device(lr_handles.device);
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(device);
+
+    // Query device properties
+    physical_device_properties = physical_device.getProperties();
+    physical_device_features = physical_device.getFeatures();
+    physical_device_memory = physical_device.getMemoryProperties();
+    physical_device_queue_families = physical_device.getQueueFamilyProperties();
+
+    LOG_INFO("Vulkan device: {}", physical_device_properties.deviceName.data());
+
+    // Use the frontend's queue
+    general_family_index = lr_handles.queue_family_index;
+    transfer_family_index = lr_handles.queue_family_index;
+    general_queue = vk::Queue(lr_handles.queue);
+    transfer_queue = vk::Queue(lr_handles.queue);
+
+    this->res_multiplier = static_cast<float>(config.resolution_multiplier);
+    this->disable_surface_sync = config.current_config.disable_surface_sync;
+
+    // Check optional extensions on frontend's device
+    bool support_buffer_device_address = false;
+    bool support_dedicated_allocations = false;
+    {
+        const std::set<std::string> optional_ext_names = {
+            vk::KHRDedicatedAllocationExtensionName,
+            vk::KHRBufferDeviceAddressExtensionName,
+            vk::KHRUniformBufferStandardLayoutExtensionName,
+            vk::KHRShaderFloat16Int8ExtensionName,
+            vk::EXTFragmentShaderInterlockExtensionName,
+            VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME,
+        };
+        for (const vk::ExtensionProperties &ext : physical_device.enumerateDeviceExtensionProperties()) {
+            if (optional_ext_names.count(ext.extensionName.data())) {
+                if (std::string_view(ext.extensionName.data()) == vk::KHRDedicatedAllocationExtensionName)
+                    support_dedicated_allocations = true;
+                if (std::string_view(ext.extensionName.data()) == vk::KHRBufferDeviceAddressExtensionName)
+                    support_buffer_device_address = true;
+                if (std::string_view(ext.extensionName.data()) == vk::KHRUniformBufferStandardLayoutExtensionName)
+                    support_standard_layout = true;
+                if (std::string_view(ext.extensionName.data()) == vk::KHRShaderFloat16Int8ExtensionName)
+                    support_fsr = true;
+                if (std::string_view(ext.extensionName.data()) == VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME)
+                    support_rasterized_order_access = true;
+            }
+        }
+
+        // We request Vulkan 1.1 in our negotiation interface, so getFeatures2 is core.
+        LOG_INFO("Querying extended features via getFeatures2 (Vulkan 1.1 core)...");
+        if (support_buffer_device_address) {
+            auto features2 = physical_device.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceBufferDeviceAddressFeatures>();
+            support_buffer_device_address &= static_cast<bool>(features2.get<vk::PhysicalDeviceBufferDeviceAddressFeatures>().bufferDeviceAddress);
+        }
+        if (support_standard_layout) {
+            auto features2 = physical_device.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceUniformBufferStandardLayoutFeatures>();
+            support_standard_layout &= static_cast<bool>(features2.get<vk::PhysicalDeviceUniformBufferStandardLayoutFeatures>().uniformBufferStandardLayout);
+        }
+        support_fsr &= static_cast<bool>(physical_device_features.shaderInt16);
+        if (support_fsr) {
+            auto features2 = physical_device.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderFloat16Int8Features>();
+            support_fsr = static_cast<bool>(features2.get<vk::PhysicalDeviceShaderFloat16Int8Features>().shaderFloat16);
+        }
+        LOG_INFO("Feature support: buffer_device_address={}, standard_layout={}, fsr={}",
+            support_buffer_device_address, support_standard_layout, support_fsr);
+    }
+
+    // In libretro, memory mapping support depends on features exposed by the
+    // frontend-created Vulkan device.
+    const bool support_memory_mapping = support_buffer_device_address && support_standard_layout;
+    supported_mapping_methods_mask = (1 << static_cast<int>(MappingMethod::Disabled));
+    mapping_method = MappingMethod::Disabled;
+    if (support_memory_mapping) {
+        mapping_method = MappingMethod::DoubleBuffer;
+        supported_mapping_methods_mask |= (1 << static_cast<int>(MappingMethod::DoubleBuffer));
+        supported_mapping_methods_mask |= (1 << static_cast<int>(MappingMethod::PageTable));
+    }
+
+    // Create Command Pools
+    {
+        vk::CommandPoolCreateInfo general_pool_info{
+            .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+            .queueFamilyIndex = general_family_index
+        };
+
+        vk::CommandPoolCreateInfo transfer_pool_info{
+            .flags = vk::CommandPoolCreateFlagBits::eTransient,
+            .queueFamilyIndex = transfer_family_index
+        };
+
+        general_command_pool = device.createCommandPool(general_pool_info);
+        transfer_command_pool = device.createCommandPool(transfer_pool_info);
+
+        general_pool_info.flags |= vk::CommandPoolCreateFlagBits::eTransient;
+        multithread_command_pool = device.createCommandPool(general_pool_info);
+    }
+
+    // Allocate Memory for Images and Buffers (VMA)
+    {
+        // Explicit VMA function pointers from our dispatcher (Vulkan 1.1).
+        const auto &d = VULKAN_HPP_DEFAULT_DISPATCHER;
+        vma::VulkanFunctions vulkan_functions{};
+        vulkan_functions.vkGetInstanceProcAddr = d.vkGetInstanceProcAddr;
+        vulkan_functions.vkGetDeviceProcAddr = d.vkGetDeviceProcAddr;
+        vulkan_functions.vkGetPhysicalDeviceProperties = d.vkGetPhysicalDeviceProperties;
+        vulkan_functions.vkGetPhysicalDeviceMemoryProperties = d.vkGetPhysicalDeviceMemoryProperties;
+        vulkan_functions.vkAllocateMemory = d.vkAllocateMemory;
+        vulkan_functions.vkFreeMemory = d.vkFreeMemory;
+        vulkan_functions.vkMapMemory = d.vkMapMemory;
+        vulkan_functions.vkUnmapMemory = d.vkUnmapMemory;
+        vulkan_functions.vkFlushMappedMemoryRanges = d.vkFlushMappedMemoryRanges;
+        vulkan_functions.vkInvalidateMappedMemoryRanges = d.vkInvalidateMappedMemoryRanges;
+        vulkan_functions.vkBindBufferMemory = d.vkBindBufferMemory;
+        vulkan_functions.vkBindImageMemory = d.vkBindImageMemory;
+        vulkan_functions.vkGetBufferMemoryRequirements = d.vkGetBufferMemoryRequirements;
+        vulkan_functions.vkGetImageMemoryRequirements = d.vkGetImageMemoryRequirements;
+        vulkan_functions.vkCreateBuffer = d.vkCreateBuffer;
+        vulkan_functions.vkDestroyBuffer = d.vkDestroyBuffer;
+        vulkan_functions.vkCreateImage = d.vkCreateImage;
+        vulkan_functions.vkDestroyImage = d.vkDestroyImage;
+        vulkan_functions.vkCmdCopyBuffer = d.vkCmdCopyBuffer;
+        // Vulkan 1.1 core (not KHR)
+        vulkan_functions.vkGetBufferMemoryRequirements2KHR = d.vkGetBufferMemoryRequirements2;
+        vulkan_functions.vkGetImageMemoryRequirements2KHR = d.vkGetImageMemoryRequirements2;
+        vulkan_functions.vkBindBufferMemory2KHR = d.vkBindBufferMemory2;
+        vulkan_functions.vkBindImageMemory2KHR = d.vkBindImageMemory2;
+        vulkan_functions.vkGetPhysicalDeviceMemoryProperties2KHR = d.vkGetPhysicalDeviceMemoryProperties2;
+
+        vma::AllocatorCreateInfo allocator_info = {
+            // No eExternallySynchronized — concurrent VMA access from game threads.
+            .physicalDevice = physical_device,
+            .device = device,
+            .pVulkanFunctions = &vulkan_functions,
+            .instance = instance,
+            .vulkanApiVersion = VK_API_VERSION_1_1,
+        };
+
+        if (support_dedicated_allocations)
+            allocator_info.flags |= vma::AllocatorCreateFlagBits::eKhrDedicatedAllocation;
+
+        if (supported_mapping_methods_mask > 1)
+            allocator_info.flags |= vma::AllocatorCreateFlagBits::eBufferDeviceAddress;
+
+        allocator = vma::createAllocator(allocator_info);
+        vkutil::init(allocator);
+    }
+
+    // Create the default image and buffer
+    {
+        default_buffer = vkutil::Buffer(KiB(4));
+        default_buffer.init_buffer(vk::BufferUsageFlagBits::eVertexBuffer);
+
+        default_image = vkutil::Image(1, 1, vk::Format::eR8G8B8A8Unorm);
+        default_image.init_image(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst);
+
+        vk::CommandBuffer cmd_buffer = vkutil::create_single_time_command(device, general_command_pool);
+        default_image.transition_to(cmd_buffer, vkutil::ImageLayout::TransferDst);
+        vk::ClearColorValue white{
+            .float32 = std::array<float, 4>{ 1.0f, 1.0f, 1.0f, 1.0f }
+        };
+        cmd_buffer.clearColorImage(default_image.image, vk::ImageLayout::eTransferDstOptimal, white, vkutil::color_subresource_range);
+        default_image.transition_to(cmd_buffer, vkutil::ImageLayout::StorageImage);
+        vkutil::end_single_time_command(device, general_queue, general_command_pool, cmd_buffer);
+
+        vk::SamplerCreateInfo sampler_info{
+            .magFilter = vk::Filter::eLinear,
+            .minFilter = vk::Filter::eLinear,
+            .mipmapMode = vk::SamplerMipmapMode::eLinear,
+            .addressModeU = vk::SamplerAddressMode::eRepeat,
+            .addressModeV = vk::SamplerAddressMode::eRepeat,
+            .addressModeW = vk::SamplerAddressMode::eRepeat,
+            .minLod = 0.0f,
+            .maxLod = 0.0f,
+        };
+        default_image.sampler = device.createSampler(sampler_info);
+    }
+
+    // Create the frame objects
+    for (int i = 0; i < MAX_FRAMES_RENDERING; i++) {
+        FrameObject &frame = frames[i];
+
+        vk::CommandPoolCreateInfo pool_info{
+            .queueFamilyIndex = general_family_index
+        };
+
+        frame.render_pool = device.createCommandPool(pool_info);
+        pool_info.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
+        frame.prerender_pool = device.createCommandPool(pool_info);
+
+        frame.destroy_queue.init(device);
+    }
+
+    // No swapchain in libretro; presentation via set_image.
+    LOG_INFO("VKState::create (libretro) done");
+
+    return true;
+}
+#else
 bool VKState::create(SDL_Window *window, std::unique_ptr<renderer::State> &state, const Config &config) {
     // Create Instance
     {
@@ -897,6 +1158,7 @@ bool VKState::create(SDL_Window *window, std::unique_ptr<renderer::State> &state
 
     return true;
 }
+#endif // !BUILD_LIBRETRO
 
 void VKState::late_init(const Config &cfg, const std::string_view game_id, MemState &mem) {
     this->mem = &mem;
@@ -957,14 +1219,30 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
 }
 
 void VKState::cleanup() {
+    if (!device)
+        return;
+
     device.waitIdle();
 
+#ifdef BUILD_LIBRETRO
+    if (!libretro_device_external)
+        screen_renderer.cleanup();
+#else
     screen_renderer.cleanup();
+#endif
 
     allocator.destroy();
 
     device.destroy(general_command_pool);
     device.destroy(transfer_command_pool);
+    device.destroy(multithread_command_pool);
+
+#ifdef BUILD_LIBRETRO
+    if (libretro_device_external) {
+        LOG_INFO("VKState::cleanup (libretro): skipping instance/device destroy");
+        return;
+    }
+#endif
 
     device.destroy();
     instance.destroy();
@@ -1039,7 +1317,11 @@ void VKState::render_frame(const SceFVector2 &viewport_pos, const SceFVector2 &v
     screen_renderer.render(surface_handle, layout, viewport);
 }
 
+#ifdef BUILD_LIBRETRO
+void VKState::swap_window(void *window) {
+#else
 void VKState::swap_window(SDL_Window *window) {
+#endif
     screen_renderer.swap_window();
 
     // look once a frame if we need to save the pipeline cache

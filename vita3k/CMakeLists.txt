@@ -83,6 +83,10 @@ if (USE_DISCORD_RICH_PRESENCE)
 	add_definitions(-DUSE_DISCORD)
 endif()
 
+if(BUILD_LIBRETRO)
+	add_definitions(-DBUILD_LIBRETRO)
+endif()
+
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -102,7 +106,9 @@ add_subdirectory(dialog)
 add_subdirectory(display)
 add_subdirectory(features)
 add_subdirectory(glutil)
-add_subdirectory(gui)
+if(NOT BUILD_LIBRETRO)
+	add_subdirectory(gui)
+endif()
 add_subdirectory(gxm)
 add_subdirectory(host)
 add_subdirectory(ime)
@@ -127,11 +133,15 @@ add_subdirectory(shader)
 add_subdirectory(threads)
 add_subdirectory(touch)
 add_subdirectory(util)
-add_subdirectory(gdbstub)
+if(NOT BUILD_LIBRETRO)
+	add_subdirectory(gdbstub)
+endif()
 add_subdirectory(packages)
 add_subdirectory(vkutil)
 
-if(ANDROID)
+if(BUILD_LIBRETRO)
+	add_subdirectory(libretro)
+elseif(ANDROID)
 	add_library(vita3k SHARED main.cpp interface.cpp performance.cpp)
 	target_link_libraries(vita3k PRIVATE SDL3::SDL3 android)
 
@@ -166,6 +176,8 @@ if(ANDROID)
 else()
 	add_executable(vita3k MACOSX_BUNDLE main.cpp interface.cpp interface.h performance.cpp)
 endif()
+
+if(NOT BUILD_LIBRETRO)
 
 if(WIN32)
 	# This file is a bit special, it is run before anything else and must be added here
@@ -334,3 +346,5 @@ if(TRACY_ENABLE_ON_CORE_COMPONENTS)
 	# Enable Tracy profiling on the main compilation target
 	target_link_libraries(vita3k PRIVATE tracy)
 endif()
+
+endif() # NOT BUILD_LIBRETRO

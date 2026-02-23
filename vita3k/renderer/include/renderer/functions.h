@@ -20,10 +20,36 @@
 #include <renderer/commands.h>
 #include <renderer/types.h>
 
+#ifdef BUILD_LIBRETRO
+#include <vulkan/vulkan.h>
+#endif
+
 struct MemState;
 struct FeatureState;
 struct Config;
+#ifndef BUILD_LIBRETRO
 struct SDL_Window;
+#endif
+
+#ifdef BUILD_LIBRETRO
+struct LibretroVulkanHandles {
+    VkInstance instance = VK_NULL_HANDLE;
+    VkPhysicalDevice gpu = VK_NULL_HANDLE;
+    VkDevice device = VK_NULL_HANDLE;
+    VkQueue queue = VK_NULL_HANDLE;
+    uint32_t queue_family_index = 0;
+    PFN_vkGetInstanceProcAddr get_instance_proc_addr = nullptr;
+    PFN_vkGetDeviceProcAddr get_device_proc_addr = nullptr;
+};
+
+// Set before calling renderer::init in libretro builds
+void set_libretro_vulkan_handles(const LibretroVulkanHandles &handles);
+const LibretroVulkanHandles &get_libretro_vulkan_handles();
+
+// Set queue lock/unlock callbacks on VKState (frontend owns the queue)
+void set_libretro_queue_lock(renderer::State *state, void *handle,
+    void (*lock_queue)(void *), void (*unlock_queue)(void *));
+#endif
 
 namespace renderer {
 struct Context;
@@ -58,7 +84,11 @@ void submit_command_list(State &state, renderer::Context *context, CommandList &
 bool is_cmd_ready(MemState &mem, CommandList &command_list);
 void process_batch(State &state, MemState &mem, Config &config, CommandList &command_list);
 void process_batches(State &state, const FeatureState &features, MemState &mem, Config &config);
+#ifdef BUILD_LIBRETRO
+bool init(std::unique_ptr<State> &state, Backend backend, const Config &config, const Root &root_paths);
+#else
 bool init(SDL_Window *window, std::unique_ptr<State> &state, Backend backend, const Config &config, const Root &root_paths);
+#endif
 
 void set_depth_bias(State &state, Context *ctx, bool is_front, int factor, int units);
 void set_depth_func(State &state, Context *ctx, bool is_front, SceGxmDepthFunc depth_func);

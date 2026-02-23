@@ -64,7 +64,11 @@ struct SavedataState {
     uint32_t button_id = SCE_SAVEDATA_DIALOG_BUTTON_ID_INVALID;
 
     std::vector<vfs::FileBuffer> icon_buffer;
+#ifndef BUILD_LIBRETRO
     std::vector<ImTextureID> icon_texture;
+#else
+    std::vector<void *> icon_texture;
+#endif
 
     uint32_t mode;
     uint32_t mode_to_display;

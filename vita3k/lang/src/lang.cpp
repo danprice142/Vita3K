@@ -20,9 +20,12 @@
 
 #include <config/state.h>
 #include <dialog/state.h>
+#ifndef BUILD_LIBRETRO
 #include <gui/state.h>
+#endif
 #include <ime/state.h>
 #include <util/fs.h>
+#include <util/log.h>
 #include <util/vector_utils.h>
 
 #include <pugixml.hpp>

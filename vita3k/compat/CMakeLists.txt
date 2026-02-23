@@ -7,5 +7,9 @@ add_library(
 )
 
 target_include_directories(compat PUBLIC include)
-target_link_libraries(compat PUBLIC gui emuenv)
-target_link_libraries(compat PRIVATE pugixml::pugixml miniz)
+if(NOT BUILD_LIBRETRO)
+	target_link_libraries(compat PUBLIC gui emuenv)
+else()
+	target_link_libraries(compat PUBLIC emuenv dialog)
+endif()
+target_link_libraries(compat PRIVATE config pugixml::pugixml miniz util)

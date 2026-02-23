@@ -23,6 +23,56 @@
 #include <stb_image.h>
 #include <util/log.h>
 
+#ifdef BUILD_LIBRETRO
+// Libretro stub: camera not supported.
+class Camera::CameraImpl {
+public:
+    std::mutex frame_mutex;
+};
+
+Camera::Camera()
+    : pImpl(std::make_unique<CameraImpl>()) {}
+Camera::~Camera() = default;
+
+int Camera::get_attribute(CameraAttributes attribute) { return 0; }
+int Camera::set_attribute(CameraAttributes attribute, int value) { return 0; }
+int Camera::open(SceCameraInfo *info, uint64_t base_tick, uint64_t start_tick) {
+    this->is_opened = true;
+    this->info = {};
+    memcpy(&(this->info), info, std::min<size_t>(sizeof(SceCameraInfo), info->size));
+    return 0;
+}
+int Camera::close() {
+    this->is_opened = false;
+    return 0;
+}
+int Camera::start() {
+    this->is_started = true;
+    return 0;
+}
+int Camera::stop() {
+    this->is_started = false;
+    return 0;
+}
+int Camera::read(SceCameraRead *read, void *pIBase, void *pUBase, void *pVBase, SceSize sizeIBase, SceSize sizeUBase, SceSize sizeVBase) {
+    memset(pIBase, 0, sizeIBase);
+    if (pUBase) memset(pUBase, 0, sizeUBase);
+    if (pVBase) memset(pVBase, 0, sizeVBase);
+    read->status = SCE_CAMERA_STATUS_IS_ACTIVE;
+    read->frame = frame_idx++;
+    return 0;
+}
+void Camera::update_config(int type, const std::string &id, const std::string &image, uint32_t color) {
+    this->type = static_cast<CameraType>(type);
+    this->id = id;
+    this->image = image;
+    this->color = color;
+}
+void init_default_cameras(Config &cfg) {
+    cfg.front_camera_type = SolidColor;
+    cfg.back_camera_type = SolidColor;
+}
+#else // !BUILD_LIBRETRO
 #include <SDL3/SDL_camera.h>
 #include <SDL3/SDL_timer.h>
 
@@ -429,3 +479,4 @@ void init_default_cameras(Config &cfg) {
         cfg.back_camera_type = SolidColor;
     }
 }
+#endif // !BUILD_LIBRETRO

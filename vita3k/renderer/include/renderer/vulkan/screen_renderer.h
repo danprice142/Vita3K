@@ -23,7 +23,9 @@
 
 #include <memory>
 
+#ifndef BUILD_LIBRETRO
 struct SDL_Window;
+#endif
 
 namespace renderer::vulkan {
 
@@ -32,7 +34,11 @@ struct VKState;
 class ScreenRenderer {
 public:
     VKState &state;
+#ifdef BUILD_LIBRETRO
+    void *window{};
+#else
     SDL_Window *window{};
+#endif
 
     vk::SurfaceKHR surface;
     vk::SwapchainKHR swapchain;
@@ -78,7 +84,11 @@ public:
 
     ScreenRenderer(VKState &state);
 
+#ifdef BUILD_LIBRETRO
+    bool create(void *window);
+#else
     bool create(SDL_Window *window);
+#endif
     // called after the logical device has been created
     bool setup();
     void cleanup();

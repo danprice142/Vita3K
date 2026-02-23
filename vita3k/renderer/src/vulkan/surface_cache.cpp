@@ -1079,7 +1079,11 @@ bool VKSurfaceCache::check_for_surface(MemState &mem, Address source_address, Ca
         // submit this command
         vk::SubmitInfo submit_info{};
         submit_info.setCommandBuffers(surface_cmd);
+#ifdef BUILD_LIBRETRO
+        state.locked_queue_submit(state.general_queue, submit_info, fence);
+#else
         state.general_queue.submit(submit_info, fence);
+#endif
 
         // now we need to wait for the fence, then destroy it along with the command buffer
         // to prevent memory leaks
@@ -1301,7 +1305,7 @@ void VKSurfaceCache::destroy_associated_framebuffers(const VKRenderTarget *rende
     destroy_framebuffers(render_target->depthstencil.view);
 }
 
-vk::ImageView VKSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const void> address, uint32_t pitch, Viewport &viewport) {
+vk::ImageView VKSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const void> address, uint32_t pitch, Viewport &viewport, vk::Image *out_image) {
     // get closest surface with an address below address
     auto ite = color_address_lookup.upper_bound(address.address());
     if (ite == color_address_lookup.begin()) {
@@ -1339,8 +1343,11 @@ vk::ImageView VKSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const 
             viewport.texture_width = info.width;
             viewport.texture_height = info.height;
 
-            if (info.swizzle == vkutil::rgba_mapping && info.texture.format == vk::Format::eR8G8B8A8Unorm)
+            if (info.swizzle == vkutil::rgba_mapping && info.texture.format == vk::Format::eR8G8B8A8Unorm) {
+                if (out_image)
+                    *out_image = info.texture.image;
                 return info.texture.view;
+            }
 
             if (!info.alternate_view) {
                 // create a view with the right swizzle and without gamma correction
@@ -1354,6 +1361,8 @@ vk::ImageView VKSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const 
                 info.alternate_view = state.device.createImageView(view_info);
             }
 
+            if (out_image)
+                *out_image = info.texture.image;
             return info.alternate_view;
         }
     }
@@ -1402,7 +1411,13 @@ std::vector<uint32_t> VKSurfaceCache::dump_frame(Ptr<const void> address, uint32
     cmd_buffer.copyImageToBuffer(info.texture.image, vk::ImageLayout::eGeneral, temp_buff.buffer, image_copy);
 
     // this will cause a waitIdle, not an issue
+#ifdef BUILD_LIBRETRO
+    if (state.libretro_lock_queue) state.libretro_lock_queue(state.libretro_queue_handle);
+#endif
     vkutil::end_single_time_command(state.device, state.general_queue, state.general_command_pool, cmd_buffer);
+#ifdef BUILD_LIBRETRO
+    if (state.libretro_unlock_queue) state.libretro_unlock_queue(state.libretro_queue_handle);
+#endif
 
     memcpy(frame.data(), temp_buff.mapped_data, frame.size() * 4);
 

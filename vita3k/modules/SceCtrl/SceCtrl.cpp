@@ -193,6 +193,10 @@ EXPORT(int, sceCtrlSetActuator, int port, const SceCtrlActuator *pState) {
         return RET_ERROR(SCE_CTRL_ERROR_NOT_SUPPORTED);
     }
 
+#ifdef BUILD_LIBRETRO
+    // TODO: Implement rumble via libretro rumble interface
+    return 0;
+#else
     CtrlState &state = emuenv.ctrl;
     for (const auto &controller : state.controllers) {
         if (controller.second.port + 1 == port) {
@@ -204,6 +208,7 @@ EXPORT(int, sceCtrlSetActuator, int port, const SceCtrlActuator *pState) {
     }
 
     return RET_ERROR(SCE_CTRL_ERROR_NO_DEVICE);
+#endif
 }
 
 EXPORT(int, sceCtrlSetAnalogStickCheckMode) {

@@ -18,7 +18,9 @@
 #include <util/fs.h>
 #include <util/string_utils.h>
 
+#ifndef BUILD_LIBRETRO
 #include <SDL3/SDL_iostream.h>
+#endif
 
 namespace fs_utils {
 
@@ -60,6 +62,23 @@ void dump_data(const fs::path &path, const void *data, const std::streamsize siz
 template <typename T>
 static bool read_data(const fs::path &path, std::vector<T> &data) {
     data.clear();
+#ifdef BUILD_LIBRETRO
+    fs::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) {
+        return false;
+    }
+    const auto size = file.tellg();
+    if (size <= 0) {
+        return false;
+    }
+    data.resize(static_cast<size_t>(size));
+    file.seekg(0, std::ios::beg);
+    if (!file.read(reinterpret_cast<char *>(data.data()), size)) {
+        data.clear();
+        return false;
+    }
+    return true;
+#else
     SDL_IOStream *file = SDL_IOFromFile(fs_utils::path_to_utf8(path).c_str(), "rb");
     if (!file) {
         return false;
@@ -84,6 +103,7 @@ static bool read_data(const fs::path &path, std::vector<T> &data) {
 
     SDL_CloseIO(file);
     return true;
+#endif
 }
 
 bool read_data(const fs::path &path, std::vector<uint8_t> &data) { return read_data<uint8_t>(path, data); }

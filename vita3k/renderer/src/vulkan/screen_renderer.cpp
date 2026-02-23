@@ -17,7 +17,9 @@
 
 #include "renderer/vulkan/screen_renderer.h"
 
+#ifndef BUILD_LIBRETRO
 #include <SDL3/SDL_vulkan.h>
+#endif
 
 #include "renderer/vulkan/state.h"
 #include "util/log.h"
@@ -43,6 +45,13 @@ ScreenRenderer::ScreenRenderer(VKState &state)
     : state(state) {
 }
 
+#ifdef BUILD_LIBRETRO
+bool ScreenRenderer::create(void *window) {
+    // No swapchain surface in libretro builds.
+    this->window = window;
+    return false;
+}
+#else
 bool ScreenRenderer::create(SDL_Window *window) {
     if (this->surface) {
         state.instance.destroySurfaceKHR(this->surface);
@@ -61,6 +70,7 @@ bool ScreenRenderer::create(SDL_Window *window) {
 
     return true;
 }
+#endif
 
 bool ScreenRenderer::setup() {
     const auto surface_formats = state.physical_device.getSurfaceFormatsKHR(surface);
@@ -122,7 +132,12 @@ void ScreenRenderer::create_swapchain() {
         extent = surface_capabilities.currentExtent;
     } else {
         int width, height;
+#ifdef BUILD_LIBRETRO
+        width = 960;
+        height = 544;
+#else
         SDL_GetWindowSizeInPixels(window, &width, &height);
+#endif
         extent.width = std::clamp<uint32_t>(width, surface_capabilities.minImageExtent.width, surface_capabilities.maxImageExtent.width);
         extent.height = std::clamp<uint32_t>(height, surface_capabilities.minImageExtent.height, surface_capabilities.maxImageExtent.height);
     }
@@ -387,7 +402,11 @@ void ScreenRenderer::swap_window() {
     submit_info.setWaitDstStageMask(dst_masks);
     submit_info.setSignalSemaphores(image_ready_semaphores[current_frame]);
     submit_info.setCommandBuffers(current_cmd_buffer);
+#ifdef BUILD_LIBRETRO
+    state.locked_queue_submit(state.general_queue, submit_info, fences[swapchain_image_idx]);
+#else
     state.general_queue.submit(submit_info, fences[swapchain_image_idx]);
+#endif
 
     // then present the surface
     vk::PresentInfoKHR present_info{
@@ -401,7 +420,12 @@ void ScreenRenderer::swap_window() {
     auto result = state.general_queue.presentKHR(&present_info);
     if (result == vk::Result::eSuboptimalKHR) {
         int width, height;
+#ifdef BUILD_LIBRETRO
+        width = extent.width;
+        height = extent.height;
+#else
         SDL_GetWindowSizeInPixels(window, &width, &height);
+#endif
 
         if (width != extent.width || height != extent.height) {
             state.device.waitIdle();
@@ -546,7 +570,12 @@ bool ScreenRenderer::rebuild_swapchain_if_visible() {
     state.device.waitIdle();
     destroy_swapchain();
     int width, height;
+#ifdef BUILD_LIBRETRO
+    width = 960;
+    height = 544;
+#else
     SDL_GetWindowSizeInPixels(window, &width, &height);
+#endif
     // don't render anything when the window is minimized
     if (width == 0 || height == 0)
         return false;
@@ -560,7 +589,12 @@ bool ScreenRenderer::rebuild_swapchain_if_visible() {
 
 bool ScreenRenderer::surface_matches_window_size() {
     int width, height;
+#ifdef BUILD_LIBRETRO
+    width = extent.width;
+    height = extent.height;
+#else
     SDL_GetWindowSizeInPixels(window, &width, &height);
+#endif
     // if we're minimized, assume the current size is OK
     if (width == 0 || height == 0)
         return true;

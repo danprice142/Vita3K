@@ -34,7 +34,9 @@
 #include <gxm/types.h>
 #include <util/log.h>
 
+#ifndef BUILD_LIBRETRO
 #include <SDL3/SDL_video.h>
+#endif
 
 #include <array>
 #include <mutex>
@@ -165,6 +167,62 @@ static void debug_output_callback(GLenum source, GLenum type, GLuint id, GLenum 
 }
 #endif
 
+#ifdef BUILD_LIBRETRO
+bool create(std::unique_ptr<State> &state, const Config &config) {
+    auto &gl_state = dynamic_cast<GLState &>(*state);
+
+    // glad already loaded by context_reset; detect GPU features and init.
+
+    const std::string gpu_name = reinterpret_cast<const GLchar *>(glGetString(GL_RENDERER));
+    const std::string version = reinterpret_cast<const GLchar *>(glGetString(GL_SHADING_LANGUAGE_VERSION));
+
+    LOG_INFO("GPU = {}", gpu_name);
+    LOG_INFO("GL_VERSION = {}", reinterpret_cast<const char *>(glGetString(GL_VERSION)));
+    LOG_INFO("GL_SHADING_LANGUAGE_VERSION = {}", version);
+
+#ifndef NDEBUG
+    glDebugMessageCallback(reinterpret_cast<GLDEBUGPROC>(debug_output_callback), nullptr);
+#endif
+
+    int total_extensions = 0;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &total_extensions);
+
+    std::unordered_map<std::string, bool *> check_extensions = {
+        { "GL_ARB_fragment_shader_interlock", &gl_state.features.support_shader_interlock },
+        { "GL_ARB_texture_barrier", &gl_state.features.support_texture_barrier },
+        { "GL_EXT_shader_framebuffer_fetch", &gl_state.features.direct_fragcolor },
+        { "GL_ARB_gl_spirv", &gl_state.features.spirv_shader },
+        { "GL_ARB_get_texture_sub_image", &gl_state.features.support_get_texture_sub_image },
+        { "GL_EXT_shader_image_load_formatted", &gl_state.features.support_unknown_format }
+    };
+
+    for (int i = 0; i < total_extensions; i++) {
+        const std::string extension = reinterpret_cast<const GLchar *>(glGetStringi(GL_EXTENSIONS, i));
+        auto find_result = check_extensions.find(extension);
+
+        if (find_result != check_extensions.end()) {
+            *find_result->second = true;
+            check_extensions.erase(find_result);
+        }
+    }
+
+    if (gl_state.features.direct_fragcolor) {
+        LOG_INFO("Your GPU supports direct access to last fragment color. Your performance with programmable blending games will be optimized.");
+    } else if (gl_state.features.support_shader_interlock) {
+        LOG_INFO("Your GPU supports shader interlock, some games that use programmable blending will have better performance.");
+    } else if (gl_state.features.support_texture_barrier) {
+        LOG_INFO("Your GPU only supports texture barrier, performance may not be good on programmable blending games.");
+    } else {
+        LOG_INFO("Your GPU doesn't support extensions that make programmable blending possible. Some games may have broken graphics.");
+    }
+
+    gl_state.features.use_mask_bit = true;
+    gl_state.res_multiplier = static_cast<float>(config.resolution_multiplier);
+    gl_state.disable_surface_sync = config.current_config.disable_surface_sync;
+
+    return gl_state.init();
+}
+#else
 bool create(SDL_Window *window, std::unique_ptr<State> &state, const Config &config) {
     auto &gl_state = dynamic_cast<GLState &>(*state);
 #ifndef NDEBUG
@@ -266,12 +324,17 @@ bool create(SDL_Window *window, std::unique_ptr<State> &state, const Config &con
 
     return gl_state.init();
 }
+#endif // !BUILD_LIBRETRO
 
 bool GLState::init() {
+#ifdef BUILD_LIBRETRO
+    // Libretro: skip screen_renderer (core handles presentation directly).
+#else
     if (!screen_renderer.init(static_assets)) {
         LOG_ERROR("Failed to initialize screen renderer");
         return false;
     }
+#endif
 
     shader_version = fmt::format("v{}", shader::CURRENT_VERSION);
 
@@ -721,9 +784,14 @@ void GLState::render_frame(const SceFVector2 &viewport_pos, const SceFVector2 &v
     screen_renderer.render(viewport_pos, viewport_size, need_uv ? uvs : nullptr, static_cast<GLuint>(surface_handle), texture_size);
 }
 
+#ifdef BUILD_LIBRETRO
+void GLState::swap_window(void *window) {
+}
+#else
 void GLState::swap_window(SDL_Window *window) {
     SDL_GL_SwapWindow(window);
 }
+#endif
 
 std::vector<uint32_t> GLState::dump_frame(DisplayState &display, uint32_t &width, uint32_t &height) {
     DisplayFrameInfo frame;

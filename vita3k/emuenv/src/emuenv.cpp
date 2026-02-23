@@ -39,7 +39,9 @@
 #include <renderer/state.h>
 #include <touch/state.h>
 
+#ifndef BUILD_LIBRETRO
 #include <gdbstub/state.h>
+#endif
 
 #include <util/warning.h>
 
@@ -87,8 +89,10 @@ EmuEnvState::EmuEnvState()
     , regmgr(*_regmgr)
     , _sfo_handle(new SfoFile)
     , sfo_handle(*_sfo_handle)
+#ifndef BUILD_LIBRETRO
     , _gdb(new GDBState)
     , gdb(*_gdb)
+#endif
     , _http(new HTTPState)
     , http(*_http)
     , _camera(new CameraState)

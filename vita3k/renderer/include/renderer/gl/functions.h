@@ -38,7 +38,11 @@ void pre_compile_program(GLState &renderer, const ShadersHash &hashs);
 // Uniforms.
 bool set_uniform_buffer(GLContext &context, const ShaderProgram *program, const bool vertex_shader, const int block_num, const int size, const uint8_t *data);
 
+#ifdef BUILD_LIBRETRO
+bool create(std::unique_ptr<renderer::State> &state, const Config &config);
+#else
 bool create(SDL_Window *window, std::unique_ptr<renderer::State> &state, const Config &config);
+#endif
 bool create(std::unique_ptr<Context> &context);
 bool create(GLState &state, std::unique_ptr<RenderTarget> &rt, const SceGxmRenderTargetParams &params, const FeatureState &features);
 bool create(std::unique_ptr<FragmentProgram> &fp, GLState &state, const SceGxmProgram &program, const SceGxmBlendInfo *blend);

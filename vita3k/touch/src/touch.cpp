@@ -23,7 +23,11 @@
 #include <touch/state.h>
 #include <touch/touch.h>
 
+#ifdef BUILD_LIBRETRO
+#include <libretro_input_state.h>
+#else
 #include <SDL3/SDL_events.h>
+#endif
 
 #include <cstring>
 
@@ -41,12 +45,14 @@ Java_org_vita3k_emulator_overlay_InputOverlay_setTouchState(JNIEnv *env, jobject
 
 static SceTouchData touch_buffers[MAX_TOUCH_BUFFER_SAVED][2];
 static int touch_buffer_idx = 0;
+#ifndef BUILD_LIBRETRO
 static bool is_touchpad = false;
 static SDL_TouchFingerEvent finger_buffer[8];
 static SDL_GamepadTouchpadEvent touchpad_buffer[8];
 static uint8_t finger_count = 0;
 static uint8_t touchpad_finger_count = 0;
 static bool is_touched[2] = { false, false };
+#endif
 // Used for mouse support
 static int curr_touch_id[2] = { 0, 0 };
 // Used for the touch screen
@@ -64,6 +70,7 @@ static void reset_pinch() {
     pinch_dist = initial_pinch_dist;
 }
 
+#ifndef BUILD_LIBRETRO
 static SceTouchData recover_touch_events(const EmuEnvState &emuenv) {
     SceTouchData touch_data;
     memset(&touch_data, 0, sizeof(touch_data));
@@ -109,6 +116,52 @@ static SceTouchData recover_touchpad_events(const EmuEnvState &emuenv) {
     return touch_data;
 }
 
+#endif
+
+void touch_vsync_update(const EmuEnvState &emuenv) {
+#ifdef BUILD_LIBRETRO
+    std::chrono::time_point<std::chrono::steady_clock> ts = std::chrono::steady_clock::now();
+    uint64_t timestamp = std::chrono::duration_cast<std::chrono::microseconds>(ts.time_since_epoch()).count();
+    SceTouchData *buffers = touch_buffers[(touch_buffer_idx + 1) % MAX_TOUCH_BUFFER_SAVED];
+    for (int port = 0; port < 2; port++) {
+        buffers[port].status = 0;
+        buffers[port].reportNum = 0;
+        buffers[port].timeStamp = timestamp;
+    }
+
+    {
+        auto &inp = libretro_input_state();
+        std::lock_guard<std::mutex> lock(inp.mutex);
+
+        // Front touchscreen
+        if (inp.front_touch_count > 0 && emuenv.touch.touch_mode[SCE_TOUCH_PORT_FRONT]) {
+            SceTouchData &front = buffers[SCE_TOUCH_PORT_FRONT];
+            front.reportNum = std::min(inp.front_touch_count, (uint32_t)SCE_TOUCH_MAX_REPORT);
+            for (uint32_t i = 0; i < front.reportNum; i++) {
+                front.report[i].id = inp.front_touch[i].id;
+                front.report[i].x = inp.front_touch[i].x;
+                front.report[i].y = inp.front_touch[i].y;
+                front.report[i].force = forceTouchEnabled[SCE_TOUCH_PORT_FRONT] ? 128 : 0;
+            }
+        }
+
+        // Rear touchpad
+        if (inp.back_touch_count > 0 && emuenv.touch.touch_mode[SCE_TOUCH_PORT_BACK]) {
+            SceTouchData &back = buffers[SCE_TOUCH_PORT_BACK];
+            back.reportNum = std::min(inp.back_touch_count, (uint32_t)SCE_TOUCH_MAX_REPORT);
+            for (uint32_t i = 0; i < back.reportNum; i++) {
+                back.report[i].id = inp.back_touch[i].id;
+                back.report[i].x = inp.back_touch[i].x;
+                back.report[i].y = inp.back_touch[i].y;
+                back.report[i].force = forceTouchEnabled[SCE_TOUCH_PORT_BACK] ? 128 : 0;
+            }
+        }
+    }
+
+    touch_buffer_idx++;
+    touch_buffer_idx %= MAX_TOUCH_BUFFER_SAVED;
+}
+#else
 void touch_vsync_update(const EmuEnvState &emuenv) {
     std::chrono::time_point<std::chrono::steady_clock> ts = std::chrono::steady_clock::now();
     uint64_t timestamp = std::chrono::duration_cast<std::chrono::microseconds>(ts.time_since_epoch()).count();
@@ -215,6 +268,7 @@ void touch_vsync_update(const EmuEnvState &emuenv) {
     touch_buffer_idx++;
     touch_buffer_idx %= MAX_TOUCH_BUFFER_SAVED;
 }
+#endif
 
 void pinch_modifier(bool isHold) {
     pinchModifierEnabled = isHold;
@@ -233,6 +287,7 @@ void pinch_automove(float velocity) {
     pinch_velocity = velocity;
 }
 
+#ifndef BUILD_LIBRETRO
 int handle_touch_event(SDL_TouchFingerEvent &finger) {
     switch (finger.type) {
     case SDL_EVENT_FINGER_DOWN: {
@@ -277,6 +332,7 @@ int handle_touch_event(SDL_TouchFingerEvent &finger) {
 }
 
 int handle_touchpad_event(SDL_GamepadTouchpadEvent &touchpad) {
+
     switch (touchpad.type) {
     case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
         if (touchpad_finger_count >= 8) // best we can do is clean everything
@@ -327,6 +383,11 @@ std::vector<SceFVector2> get_touchpad_fingers_pos(SceTouchPortType &port) {
 
     return touchpad_fingers_pos;
 }
+#else
+std::vector<SceFVector2> get_touchpad_fingers_pos(SceTouchPortType &port) {
+    return {};
+}
+#endif
 
 int toggle_touchscreen() {
     if (touchscreen_port == SCE_TOUCH_PORT_FRONT) {

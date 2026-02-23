@@ -23,9 +23,11 @@
 #include <config/version.h>
 #include <display/state.h>
 #include <emuenv/state.h>
+#ifndef BUILD_LIBRETRO
 #include <gui/functions.h>
 #include <gui/imgui_impl_sdl.h>
 #include <gui/state.h>
+#endif
 #include <io/functions.h>
 #include <kernel/state.h>
 #include <motion/state.h>
@@ -41,6 +43,7 @@
 #include <app/discord.h>
 #endif
 
+#ifndef BUILD_LIBRETRO
 #include <gdbstub/functions.h>
 
 #include <SDL3/SDL_filesystem.h>
@@ -55,8 +58,30 @@
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_system.h>
 #endif
+#endif // !BUILD_LIBRETRO
 
 namespace app {
+
+#ifdef BUILD_LIBRETRO
+void update_viewport(EmuEnvState &state) {
+    state.window_size.x = DEFAULT_RES_WIDTH;
+    state.window_size.y = DEFAULT_RES_HEIGHT;
+    state.drawable_size.x = DEFAULT_RES_WIDTH;
+    state.drawable_size.y = DEFAULT_RES_HEIGHT;
+    state.system_dpi_scale = 1.0f;
+    state.manual_dpi_scale = 1.0f;
+    state.logical_viewport_size.x = static_cast<SceFloat>(DEFAULT_RES_WIDTH);
+    state.logical_viewport_size.y = static_cast<SceFloat>(DEFAULT_RES_HEIGHT);
+    state.logical_viewport_pos.x = 0;
+    state.logical_viewport_pos.y = 0;
+    state.drawable_viewport_size.x = static_cast<SceFloat>(DEFAULT_RES_WIDTH);
+    state.drawable_viewport_size.y = static_cast<SceFloat>(DEFAULT_RES_HEIGHT);
+    state.drawable_viewport_pos.x = 0;
+    state.drawable_viewport_pos.y = 0;
+    state.gui_scale.x = 1.0f;
+    state.gui_scale.y = 1.0f;
+}
+#else
 void update_viewport(EmuEnvState &state) {
     int w = 0;
     int h = 0;
@@ -140,7 +165,128 @@ void update_viewport(EmuEnvState &state) {
         }
     }
 }
+#endif // BUILD_LIBRETRO
 
+#ifdef BUILD_LIBRETRO
+void init_paths(Root &root_paths) {
+    // Paths set by frontend; create required directories.
+    fs::create_directories(root_paths.get_config_path());
+    fs::create_directories(root_paths.get_cache_path());
+    fs::create_directories(root_paths.get_log_path() / "shaderlog");
+    fs::create_directories(root_paths.get_log_path() / "texturelog");
+    fs::create_directories(root_paths.get_patch_path());
+}
+
+bool init(EmuEnvState &state, Config &cfg, const Root &root_paths) {
+    state.cfg = std::move(cfg);
+
+    state.base_path = root_paths.get_base_path();
+    state.default_path = root_paths.get_pref_path();
+    state.log_path = root_paths.get_log_path();
+    state.config_path = root_paths.get_config_path();
+    state.cache_path = root_paths.get_cache_path();
+    state.shared_path = root_paths.get_shared_path();
+    state.static_assets_path = root_paths.get_static_assets_path();
+    state.patch_path = root_paths.get_patch_path();
+
+    if (state.cfg.pref_path == root_paths.get_pref_path() || state.cfg.pref_path.empty())
+        state.pref_path = root_paths.get_pref_path();
+    else {
+        auto last_char = state.cfg.pref_path.back();
+        if (last_char != fs::path::preferred_separator && last_char != '/')
+            state.cfg.pref_path += fs::path::preferred_separator;
+        state.pref_path = state.cfg.get_pref_path();
+    }
+
+    // Inline gui::set_current_config (gui module excluded).
+    state.cfg.current_config.cpu_opt = state.cfg.cpu_opt;
+    state.cfg.current_config.modules_mode = state.cfg.modules_mode;
+    state.cfg.current_config.lle_modules = state.cfg.lle_modules;
+    state.cfg.current_config.backend_renderer = state.cfg.backend_renderer;
+    state.cfg.current_config.high_accuracy = state.cfg.high_accuracy;
+    state.cfg.current_config.resolution_multiplier = state.cfg.resolution_multiplier;
+    state.cfg.current_config.disable_surface_sync = state.cfg.disable_surface_sync;
+    state.cfg.current_config.screen_filter = state.cfg.screen_filter;
+    state.cfg.current_config.memory_mapping = state.cfg.memory_mapping;
+    state.cfg.current_config.v_sync = state.cfg.v_sync;
+    state.cfg.current_config.anisotropic_filtering = state.cfg.anisotropic_filtering;
+    state.cfg.current_config.async_pipeline_compilation = state.cfg.async_pipeline_compilation;
+    state.cfg.current_config.import_textures = state.cfg.import_textures;
+    state.cfg.current_config.export_textures = state.cfg.export_textures;
+    state.cfg.current_config.export_as_png = state.cfg.export_as_png;
+    state.cfg.current_config.fps_hack = state.cfg.fps_hack;
+    state.cfg.current_config.audio_volume = state.cfg.audio_volume;
+    state.cfg.current_config.ngs_enable = state.cfg.ngs_enable;
+    state.cfg.current_config.pstv_mode = state.cfg.pstv_mode;
+    state.cfg.current_config.show_touchpad_cursor = state.cfg.show_touchpad_cursor;
+    state.cfg.current_config.file_loading_delay = state.cfg.file_loading_delay;
+    state.cfg.current_config.psn_signed_in = state.cfg.psn_signed_in;
+
+    // Renderer creation deferred until context_reset callback.
+    state.backend_renderer = renderer::Backend::Vulkan;
+
+    if (!init(state.io, state.cache_path, state.log_path, state.pref_path, state.cfg.console)) {
+        LOG_ERROR("Failed to initialize file system for the emulator!");
+        return false;
+    }
+
+    state.motion.init();
+
+    return true;
+}
+
+bool late_init(EmuEnvState &state) {
+    if (state.renderer)
+        state.renderer->late_init(state.cfg, state.app_path, state.mem);
+
+    const bool need_page_table = state.renderer && (state.renderer->mapping_method == MappingMethod::PageTable || state.renderer->mapping_method == MappingMethod::NativeBuffer);
+    if (!init(state.mem, need_page_table)) {
+        LOG_ERROR("Failed to initialize memory for emulator state!");
+        return false;
+    }
+
+    const ResumeAudioThread resume_thread = [&state](SceUID thread_id) {
+        const auto thread = state.kernel.get_thread(thread_id);
+        const std::lock_guard<std::mutex> lock(thread->mutex);
+        if (thread->status == ThreadStatus::wait) {
+            thread->update_status(ThreadStatus::run);
+        }
+    };
+    if (!state.audio.init(resume_thread, state.cfg.audio_backend)) {
+        LOG_WARN("Failed to initialize audio! Audio will not work.");
+    }
+
+    if (!ngs::init(state.ngs, state.mem)) {
+        LOG_ERROR("Failed to initialize ngs.");
+        return false;
+    }
+
+    return true;
+}
+
+void destroy(EmuEnvState &emuenv, ImGui_State *imgui) {
+    if (emuenv.cfg.overwrite_config)
+        config::serialize_config(emuenv.cfg, emuenv.cfg.config_path);
+}
+
+void switch_state(EmuEnvState &emuenv, const bool pause) {
+    if (pause)
+        emuenv.kernel.pause_threads();
+    else
+        emuenv.kernel.resume_threads();
+    emuenv.audio.switch_state(pause);
+}
+
+void error_dialog(const std::string &message) {
+    LOG_ERROR("Error: {}", message);
+}
+
+void set_window_title(EmuEnvState &emuenv) {
+}
+
+void calculate_fps(EmuEnvState &emuenv) {
+}
+#else // !BUILD_LIBRETRO
 void init_paths(Root &root_paths) {
 #ifdef __ANDROID__
     fs::path storage_path = fs::path(SDL_GetAndroidExternalStoragePath()) / "";
@@ -475,5 +621,6 @@ void switch_state(EmuEnvState &emuenv, const bool pause) {
     }
     emuenv.audio.switch_state(pause);
 }
+#endif // !BUILD_LIBRETRO
 
 } // namespace app

@@ -26,7 +26,9 @@
 #include <mutex>
 #include <string_view>
 
+#ifndef BUILD_LIBRETRO
 struct SDL_Window;
+#endif
 struct DisplayState;
 struct GxmState;
 struct Config;
@@ -107,7 +109,11 @@ struct State {
     virtual void render_frame(const SceFVector2 &viewport_pos, const SceFVector2 &viewport_size, DisplayState &display,
         const GxmState &gxm, MemState &mem)
         = 0;
+#ifdef BUILD_LIBRETRO
+    virtual void swap_window(void *window) = 0;
+#else
     virtual void swap_window(SDL_Window *window) = 0;
+#endif
     // perform a screenshot of the (upscaled) frame to be rendered and return it in a vector in its rgba8 format
     virtual std::vector<uint32_t> dump_frame(DisplayState &display, uint32_t &width, uint32_t &height) = 0;
     // return a mask of the features which can influence the compiled shaders

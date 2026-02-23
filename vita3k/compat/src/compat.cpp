@@ -22,7 +22,9 @@
 
 #include <dialog/state.h>
 #include <emuenv/state.h>
+#ifndef BUILD_LIBRETRO
 #include <gui/state.h>
+#endif
 
 #include <util/net_utils.h>
 
@@ -41,6 +43,7 @@ enum LabelIdState {
 
 namespace compat {
 
+#ifndef BUILD_LIBRETRO
 static std::string db_updated_at;
 static const uint32_t db_version = 1;
 static uint32_t db_issue_count = 0;
@@ -244,5 +247,7 @@ bool update_app_compat_db(GuiState &gui, EmuEnvState &emuenv) {
 
     return true;
 }
+
+#endif // !BUILD_LIBRETRO
 
 } // namespace compat

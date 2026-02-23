@@ -22,6 +22,7 @@
 #include <renderer/types.h>
 
 #include <renderer/gl/functions.h>
+#include <renderer/gl/state.h>
 #include <renderer/vulkan/functions.h>
 #include <renderer/vulkan/state.h>
 
@@ -250,6 +251,34 @@ void destroy(SceGxmSyncObject *sync, State &state) {
     // nothing to do right now
 }
 
+#ifdef BUILD_LIBRETRO
+bool init(std::unique_ptr<State> &state, Backend backend, const Config &config, const Root &root_paths) {
+    switch (backend) {
+    case Backend::OpenGL:
+        state = std::make_unique<gl::GLState>();
+        state->init_paths(root_paths);
+        if (!gl::create(state, config))
+            return false;
+        break;
+
+    case Backend::Vulkan:
+        state = std::make_unique<vulkan::VKState>(config.gpu_idx);
+        state->init_paths(root_paths);
+        if (!vulkan::create(state, config))
+            return false;
+        break;
+
+    default:
+        LOG_ERROR("Cannot create a renderer with unsupported backend {}.", static_cast<int>(backend));
+        return false;
+    }
+
+    state->current_backend = backend;
+    state->command_buffer_queue.maxPendingCount_ = 30;
+
+    return true;
+}
+#else
 bool init(SDL_Window *window, std::unique_ptr<State> &state, Backend backend, const Config &config, const Root &root_paths) {
     switch (backend) {
     case Backend::OpenGL:
@@ -278,4 +307,5 @@ bool init(SDL_Window *window, std::unique_ptr<State> &state, Backend backend, co
 
     return true;
 }
+#endif
 } // namespace renderer

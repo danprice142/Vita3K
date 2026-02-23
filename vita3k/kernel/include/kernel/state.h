@@ -31,6 +31,7 @@
 #include <util/types.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <map>
 #include <mutex>
 #include <vector>
@@ -94,6 +95,7 @@ struct KernelState {
     KernelState();
 
     std::mutex mutex;
+    std::condition_variable threads_changed_cond;
     CodecEngineBlocks codec_blocks;
 
     Ptr<const void> tls_address = Ptr<const void>(0);
@@ -158,6 +160,7 @@ struct KernelState {
     Ptr<Ptr<void>> get_thread_tls_addr(MemState &mem, SceUID thread_id, int key);
 
     void exit_delete_all_threads();
+    bool wait_for_all_threads_exit(uint32_t timeout_ms = 5000);
     bool is_threads_paused() { return !paused_threads_status.empty(); }
     void pause_threads();
     void resume_threads();

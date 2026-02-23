@@ -17,7 +17,9 @@
 
 #pragma once
 
+#ifndef BUILD_LIBRETRO
 #include <SDL3/SDL_events.h>
 #include <emuenv/state.h>
 void handle_motion_event(EmuEnvState &emuenv, int32_t sensor_type, const SDL_GamepadSensorEvent &sensor);
 void handle_motion_event(EmuEnvState &emuenv, int32_t sensor_type, const SDL_SensorEvent &sensor);
+#endif

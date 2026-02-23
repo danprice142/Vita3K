@@ -109,10 +109,27 @@ struct VKState : public renderer::State {
     bool support_unix_fd_import = false;
 #endif
 
+#ifdef BUILD_LIBRETRO
+    // When true, instance and device are owned by the libretro frontend — do NOT destroy them
+    bool libretro_device_external = false;
+
+    // Queue locking for libretro — frontend owns the queue, all submissions must be locked
+    void *libretro_queue_handle = nullptr;
+    void (*libretro_lock_queue)(void *handle) = nullptr;
+    void (*libretro_unlock_queue)(void *handle) = nullptr;
+
+    // Locked queue submit helper — wraps lock/submit/unlock for libretro
+    void locked_queue_submit(vk::Queue queue, const vk::SubmitInfo &submit_info, vk::Fence fence = nullptr);
+#endif
+
     VKState(int gpu_idx);
 
     bool init() override;
+#ifdef BUILD_LIBRETRO
+    bool create(std::unique_ptr<renderer::State> &state, const Config &config);
+#else
     bool create(SDL_Window *window, std::unique_ptr<renderer::State> &state, const Config &config);
+#endif
     void late_init(const Config &cfg, const std::string_view game_id, MemState &mem) override;
     void cleanup();
 
@@ -122,7 +139,11 @@ struct VKState : public renderer::State {
 
     void render_frame(const SceFVector2 &viewport_pos, const SceFVector2 &viewport_size, DisplayState &display,
         const GxmState &gxm, MemState &mem) override;
+#ifdef BUILD_LIBRETRO
+    void swap_window(void *window) override;
+#else
     void swap_window(SDL_Window *window) override;
+#endif
     std::vector<uint32_t> dump_frame(DisplayState &display, uint32_t &width, uint32_t &height) override;
 
     uint32_t get_features_mask() override;

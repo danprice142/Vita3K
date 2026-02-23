@@ -272,6 +272,97 @@ if(ANDROID)
 endif()
 add_subdirectory(ffmpeg)
 
+if(MSVC AND BUILD_LIBRETRO)
+	if(NOT ARCHITECTURE STREQUAL "x86_64")
+		message(FATAL_ERROR "Static OpenSSL bootstrap for BUILD_LIBRETRO is currently supported only on x86_64 Windows")
+	endif()
+
+	set(OPENSSL_USE_STATIC_LIBS TRUE)
+	set(VITA3K_OPENSSL_VERSION "openssl-3.6.1")
+	set(VITA3K_OPENSSL_ARCHIVE "${CMAKE_BINARY_DIR}/external/${VITA3K_OPENSSL_VERSION}.tar.gz")
+	set(VITA3K_OPENSSL_SOURCE_DIR "${CMAKE_BINARY_DIR}/external/${VITA3K_OPENSSL_VERSION}")
+	set(VITA3K_OPENSSL_INSTALL_DIR "${CMAKE_BINARY_DIR}/external/openssl-static/x64")
+
+	if(NOT EXISTS "${VITA3K_OPENSSL_INSTALL_DIR}/lib/libssl.lib" OR NOT EXISTS "${VITA3K_OPENSSL_INSTALL_DIR}/lib/libcrypto.lib")
+		if(NOT EXISTS "${VITA3K_OPENSSL_ARCHIVE}")
+			message(STATUS "Downloading OpenSSL source for static libretro linkage...")
+			file(DOWNLOAD https://github.com/openssl/openssl/releases/download/openssl-3.6.1/openssl-3.6.1.tar.gz
+				"${VITA3K_OPENSSL_ARCHIVE}" SHOW_PROGRESS)
+		endif()
+
+		if(NOT EXISTS "${VITA3K_OPENSSL_SOURCE_DIR}/Configure")
+			message(STATUS "Extracting OpenSSL source...")
+			execute_process(
+				COMMAND ${CMAKE_COMMAND} -E tar xf "${VITA3K_OPENSSL_ARCHIVE}"
+				WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/external"
+				RESULT_VARIABLE VITA3K_OPENSSL_TAR_RESULT)
+			if(NOT VITA3K_OPENSSL_TAR_RESULT EQUAL 0)
+				message(FATAL_ERROR "Failed to extract OpenSSL source archive")
+			endif()
+		endif()
+
+		find_program(PERL_EXECUTABLE perl REQUIRED)
+		execute_process(
+			COMMAND ${PERL_EXECUTABLE} -V:myuname
+			OUTPUT_VARIABLE VITA3K_PERL_UNAME
+			OUTPUT_STRIP_TRAILING_WHITESPACE)
+		string(TOLOWER "${VITA3K_PERL_UNAME}" VITA3K_PERL_UNAME_LOWER)
+		if(VITA3K_PERL_UNAME_LOWER MATCHES "cygwin|msys")
+			message(FATAL_ERROR "Static OpenSSL build for libretro requires a native Windows Perl (e.g. Strawberry Perl). Current Perl is not compatible: ${VITA3K_PERL_UNAME}")
+		endif()
+
+		set(NMAKE_EXECUTABLE "")
+		if(CMAKE_GENERATOR_INSTANCE)
+			file(GLOB VITA3K_NMAKE_CANDIDATES
+				"${CMAKE_GENERATOR_INSTANCE}/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe"
+				"${CMAKE_GENERATOR_INSTANCE}/VC/Tools/MSVC/*/bin/Hostx86/x64/nmake.exe")
+			if(VITA3K_NMAKE_CANDIDATES)
+				list(GET VITA3K_NMAKE_CANDIDATES 0 NMAKE_EXECUTABLE)
+			endif()
+		endif()
+		if(NOT NMAKE_EXECUTABLE)
+			find_program(NMAKE_EXECUTABLE NAMES nmake REQUIRED)
+		endif()
+		set(VITA3K_VCVARSALL_BAT "${CMAKE_GENERATOR_INSTANCE}/VC/Auxiliary/Build/vcvarsall.bat")
+		if(NOT EXISTS "${VITA3K_VCVARSALL_BAT}")
+			message(FATAL_ERROR "vcvarsall.bat was not found: ${VITA3K_VCVARSALL_BAT}")
+		endif()
+		file(TO_NATIVE_PATH "${VITA3K_VCVARSALL_BAT}" VITA3K_VCVARSALL_BAT_NATIVE)
+		file(TO_NATIVE_PATH "${PERL_EXECUTABLE}" VITA3K_PERL_EXECUTABLE_NATIVE)
+		file(TO_NATIVE_PATH "${VITA3K_OPENSSL_INSTALL_DIR}" VITA3K_OPENSSL_INSTALL_DIR_NATIVE)
+		file(TO_NATIVE_PATH "${NMAKE_EXECUTABLE}" VITA3K_NMAKE_EXECUTABLE_NATIVE)
+
+		message(STATUS "Configuring OpenSSL static build for libretro...")
+		execute_process(
+			COMMAND cmd /c "call \"${VITA3K_VCVARSALL_BAT_NATIVE}\" x64 >nul && \"${VITA3K_PERL_EXECUTABLE_NATIVE}\" Configure VC-WIN64A no-shared no-tests --prefix=\"${VITA3K_OPENSSL_INSTALL_DIR_NATIVE}\" --openssldir=\"${VITA3K_OPENSSL_INSTALL_DIR_NATIVE}\""
+			WORKING_DIRECTORY "${VITA3K_OPENSSL_SOURCE_DIR}"
+			RESULT_VARIABLE VITA3K_OPENSSL_CONFIGURE_RESULT)
+		if(NOT VITA3K_OPENSSL_CONFIGURE_RESULT EQUAL 0)
+			message(FATAL_ERROR "OpenSSL Configure failed for static libretro build")
+		endif()
+
+		message(STATUS "Building OpenSSL static libraries for libretro...")
+		execute_process(
+			COMMAND cmd /c "call \"${VITA3K_VCVARSALL_BAT_NATIVE}\" x64 >nul && \"${VITA3K_NMAKE_EXECUTABLE_NATIVE}\""
+			WORKING_DIRECTORY "${VITA3K_OPENSSL_SOURCE_DIR}"
+			RESULT_VARIABLE VITA3K_OPENSSL_BUILD_RESULT)
+		if(NOT VITA3K_OPENSSL_BUILD_RESULT EQUAL 0)
+			message(FATAL_ERROR "OpenSSL static library build failed")
+		endif()
+
+		execute_process(
+			COMMAND cmd /c "call \"${VITA3K_VCVARSALL_BAT_NATIVE}\" x64 >nul && \"${VITA3K_NMAKE_EXECUTABLE_NATIVE}\" install_sw"
+			WORKING_DIRECTORY "${VITA3K_OPENSSL_SOURCE_DIR}"
+			RESULT_VARIABLE VITA3K_OPENSSL_INSTALL_RESULT)
+		if(NOT VITA3K_OPENSSL_INSTALL_RESULT EQUAL 0)
+			message(FATAL_ERROR "OpenSSL static library install failed")
+		endif()
+	endif()
+
+	set(OPENSSL_ROOT_DIR "${VITA3K_OPENSSL_INSTALL_DIR}" CACHE PATH "Path to OpenSSL root" FORCE)
+	set(OpenSSL_DIR "${VITA3K_OPENSSL_INSTALL_DIR}/lib/cmake/OpenSSL" CACHE PATH "Path to OpenSSL CMake config" FORCE)
+endif()
+
 if(APPLE OR NOT FORCE_BUILD_OPENSSL_MAC)
 	execute_process(
 		COMMAND brew --prefix openssl

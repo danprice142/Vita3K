@@ -47,7 +47,11 @@ add_library(
 
 target_include_directories(renderer PUBLIC include)
 target_link_libraries(renderer PUBLIC display mem stb shader glutil threads config util vkutil)
-target_link_libraries(renderer PRIVATE ddspp SDL3::SDL3 stb ffmpeg xxHash::xxhash concurrentqueue)
+if(BUILD_LIBRETRO)
+	target_link_libraries(renderer PRIVATE ddspp stb ffmpeg xxHash::xxhash concurrentqueue)
+else()
+	target_link_libraries(renderer PRIVATE ddspp SDL3::SDL3 stb ffmpeg xxHash::xxhash concurrentqueue)
+endif()
 
 if(ANDROID)
 	target_link_libraries(renderer PRIVATE android adrenotools)

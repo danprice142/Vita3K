@@ -20,7 +20,9 @@
 #include <dialog/state.h>
 #include <dialog/types.h>
 #include <emuenv/app_util.h>
+#ifndef BUILD_LIBRETRO
 #include <gui/state.h>
+#endif
 #include <io/device.h>
 #include <io/functions.h>
 #include <io/vfs.h>
@@ -29,7 +31,9 @@
 #include <util/log.h>
 #include <util/string_utils.h>
 
+#ifndef BUILD_LIBRETRO
 #include <SDL3/SDL_timer.h>
+#endif
 
 #include <util/tracy.h>
 TRACY_MODULE_NAME(SceCommonDialog);
@@ -707,7 +711,11 @@ EXPORT(int, sceNpTrophySetupDialogInit, const Ptr<SceNpTrophySetupDialogParam> p
 
     emuenv.common_dialog.status = SCE_COMMON_DIALOG_STATUS_RUNNING;
     emuenv.common_dialog.type = TROPHY_SETUP_DIALOG;
+#ifdef BUILD_LIBRETRO
+    emuenv.common_dialog.trophy.tick = 0;
+#else
     emuenv.common_dialog.trophy.tick = SDL_GetTicks() + ((param.get(emuenv.mem)->options & 0x01) ? 3000 : 0);
+#endif
     return 0;
 }
 

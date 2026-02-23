@@ -18,7 +18,9 @@
 #pragma once
 
 #include <cstdint>
+#ifndef BUILD_LIBRETRO
 #include <imgui.h>
+#endif
 #include <map>
 #include <string>
 
@@ -41,10 +43,17 @@ struct Compatibility {
     time_t updated_at;
 };
 
+#ifndef BUILD_LIBRETRO
 struct CompatState {
     bool compat_db_loaded = false;
     std::map<std::string, Compatibility> app_compat_db;
     static std::map<CompatibilityState, ImVec4> compat_color;
 };
+#else
+struct CompatState {
+    bool compat_db_loaded = false;
+    std::map<std::string, Compatibility> app_compat_db;
+};
+#endif
 
 } // namespace compat

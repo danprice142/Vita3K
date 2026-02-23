@@ -8,7 +8,12 @@ add_library(
 )
 
 target_include_directories(ctrl PUBLIC include)
-target_link_libraries(ctrl PUBLIC emuenv SDL3::SDL3 util)
+if(BUILD_LIBRETRO)
+	target_include_directories(ctrl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../libretro)
+	target_link_libraries(ctrl PUBLIC emuenv util)
+else()
+	target_link_libraries(ctrl PUBLIC emuenv SDL3::SDL3 util)
+endif()
 target_link_libraries(ctrl PRIVATE config dialog display kernel)
 if(ANDROID)
 	target_link_libraries(ctrl PRIVATE android)

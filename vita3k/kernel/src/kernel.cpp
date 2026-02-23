@@ -28,7 +28,14 @@
 #include <util/lock_and_find.h>
 #include <util/log.h>
 
+#include <chrono>
+
+#ifdef BUILD_LIBRETRO
+#include <semaphore>
+#include <thread>
+#else
 #include <SDL3/SDL_mutex.h>
+#endif
 
 int CorenumAllocator::new_corenum() {
     const std::lock_guard<std::mutex> guard(lock);
@@ -47,6 +54,18 @@ void CorenumAllocator::set_max_core_count(const std::size_t max) {
     alloc.set_maximum(max);
 }
 
+#ifdef BUILD_LIBRETRO
+struct ThreadParams {
+    KernelState *kernel = nullptr;
+    SceUID thid = SCE_KERNEL_ERROR_ILLEGAL_THREAD_ID;
+    std::binary_semaphore *host_may_destroy_params = nullptr;
+};
+
+static void thread_function(void *data) {
+    assert(data != nullptr);
+    const ThreadParams params = *static_cast<const ThreadParams *>(data);
+    params.host_may_destroy_params->release();
+#else
 // TODO implement cross platform debug thread name setter and eliminate SDL thread
 struct ThreadParams {
     KernelState *kernel = nullptr;
@@ -58,6 +77,7 @@ static int SDLCALL thread_function(void *data) {
     assert(data != nullptr);
     const ThreadParams params = *static_cast<const ThreadParams *>(data);
     SDL_SignalSemaphore(params.host_may_destroy_params);
+#endif
     const ThreadStatePtr thread = params.kernel->get_thread(params.thid);
 #ifdef TRACY_ENABLE
     if (!thread->name.empty()) {
@@ -71,11 +91,16 @@ static int SDLCALL thread_function(void *data) {
     thread->run_loop();
     const uint32_t r0 = read_reg(*thread->cpu, 0);
 
-    std::lock_guard<std::mutex> lock(params.kernel->mutex);
-    params.kernel->threads.erase(thread->id);
-    params.kernel->corenum_allocator.free_corenum(get_processor_id(*thread->cpu));
+    {
+        std::lock_guard<std::mutex> lock(params.kernel->mutex);
+        params.kernel->threads.erase(thread->id);
+        params.kernel->corenum_allocator.free_corenum(get_processor_id(*thread->cpu));
+    }
+    params.kernel->threads_changed_cond.notify_all();
 
+#ifndef BUILD_LIBRETRO
     return r0;
+#endif
 }
 
 KernelState::KernelState()
@@ -147,10 +172,18 @@ ThreadStatePtr KernelState::create_thread(MemState &mem, const char *name, Ptr<c
     params.kernel = this;
     params.thid = thread->id;
 
+#ifdef BUILD_LIBRETRO
+    std::binary_semaphore sem(0);
+    params.host_may_destroy_params = &sem;
+    std::thread t(thread_function, &params);
+    t.detach();
+    sem.acquire();
+#else
     params.host_may_destroy_params = SDL_CreateSemaphore(0);
     SDL_DetachThread(SDL_CreateThread(&thread_function, thread->name.c_str(), &params));
     SDL_WaitSemaphore(params.host_may_destroy_params);
     SDL_DestroySemaphore(params.host_may_destroy_params);
+#endif
     return thread;
 }
 
@@ -168,9 +201,51 @@ Ptr<Ptr<void>> KernelState::get_thread_tls_addr(MemState &mem, SceUID thread_id,
 
 void KernelState::exit_delete_all_threads() {
     const std::lock_guard<std::mutex> lock(mutex);
-    for (auto &[_, thread] : threads)
+    LOG_DEBUG("KernelState::exit_delete_all_threads: signaling {} threads for removal", threads.size());
+    for (auto &[_, thread] : threads) {
         // Skip end callbacks; running guest code can access torn-down state
         thread->exit_delete(false);
+    }
+}
+
+bool KernelState::wait_for_all_threads_exit(uint32_t timeout_ms) {
+    std::unique_lock<std::mutex> lock(mutex);
+
+    if (threads.empty()) {
+        LOG_INFO("Kernel wait_for_all_threads_exit: no guest threads to wait for");
+        return true;
+    }
+
+    LOG_INFO("Kernel wait_for_all_threads_exit: waiting for {} guest threads (timeout={}ms)",
+        threads.size(), timeout_ms);
+
+    // Log remaining thread details for debugging
+    if (!threads.empty()) {
+        LOG_DEBUG("Kernel wait_for_all_threads_exit: remaining threads:");
+        for (const auto &[id, thread] : threads) {
+            LOG_DEBUG("  Thread '{}' (id={}): status={}", 
+                thread->name, id, static_cast<int>(thread->status));
+        }
+    }
+
+    const bool done = threads_changed_cond.wait_for(lock,
+        std::chrono::milliseconds(timeout_ms),
+        [&]() {
+            return threads.empty();
+        });
+
+    if (!done) {
+        LOG_WARN("Kernel wait_for_all_threads_exit: timed out with {} guest threads still active", threads.size());
+        // Log which threads are still stuck
+        for (const auto &[id, thread] : threads) {
+            LOG_WARN("  Stuck thread '{}' (id={}): status={}", 
+                thread->name, id, static_cast<int>(thread->status));
+        }
+        return false;
+    }
+
+    LOG_INFO("Kernel wait_for_all_threads_exit: all guest threads exited");
+    return true;
 }
 
 void KernelState::pause_threads() {

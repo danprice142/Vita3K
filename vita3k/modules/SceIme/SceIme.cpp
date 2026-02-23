@@ -17,8 +17,10 @@
 
 #include <module/module.h>
 
+#ifndef BUILD_LIBRETRO
 #ifdef __ANDROID__
 #include <gui/functions.h>
+#endif
 #endif
 
 #include <ime/functions.h>
@@ -76,7 +78,9 @@ EXPORT(SceInt32, sceImeOpen, SceImeParam *param) {
     default: break;
     }
 
+#ifndef BUILD_LIBRETRO
     gui::init_ime_lang(emuenv.ime, static_cast<SceImeLanguage>(emuenv.cfg.current_ime_lang));
+#endif
 
     emuenv.ime.edit_text.str = emuenv.ime.param.inputTextBuffer;
     emuenv.ime.param.inputTextBuffer = Ptr<SceWChar16>(alloc(emuenv.mem, SCE_IME_MAX_PREEDIT_LENGTH + emuenv.ime.param.maxTextLength + 1, "ime_str"));

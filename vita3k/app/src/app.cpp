@@ -24,6 +24,7 @@
 #include <io/state.h>
 #include <util/log.h>
 
+#ifndef BUILD_LIBRETRO
 #include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_timer.h>
 
@@ -32,9 +33,11 @@
 #include <host/dialog/filesystem.h>
 #include <miniz.h>
 #endif
+#endif // !BUILD_LIBRETRO
 
 namespace app {
 
+#ifndef BUILD_LIBRETRO
 void error_dialog(const std::string &message, SDL_Window *window) {
     if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", message.c_str(), window)) {
         LOG_ERROR("SDL Error: {}", message);
@@ -81,6 +84,7 @@ void set_window_title(EmuEnvState &emuenv) {
 
     SDL_SetWindowTitle(emuenv.window.get(), title_to_set.c_str());
 }
+#endif // !BUILD_LIBRETRO
 
 #ifdef __ANDROID__
 void add_custom_driver(EmuEnvState &emuenv) {

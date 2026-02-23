@@ -21,7 +21,9 @@
 
 struct Config;
 struct EmuEnvState;
+#ifndef BUILD_LIBRETRO
 struct SDL_Window;
+#endif
 struct ImGui_State;
 class Root;
 
@@ -41,7 +43,11 @@ bool late_init(EmuEnvState &state);
 void destroy(EmuEnvState &emuenv, ImGui_State *imgui);
 void update_viewport(EmuEnvState &state);
 void switch_state(EmuEnvState &emuenv, const bool pause);
+#ifndef BUILD_LIBRETRO
 void error_dialog(const std::string &message, SDL_Window *window = nullptr);
+#else
+void error_dialog(const std::string &message);
+#endif
 
 #ifdef __ANDROID__
 void add_custom_driver(EmuEnvState &emuenv);

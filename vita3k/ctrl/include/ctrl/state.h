@@ -19,14 +19,17 @@
 
 #include <ctrl/ctrl.h>
 
+#ifndef BUILD_LIBRETRO
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_haptic.h>
+#endif
 
 #include <cstring>
 #include <map>
 #include <memory>
 #include <mutex>
 
+#ifndef BUILD_LIBRETRO
 typedef std::shared_ptr<SDL_Gamepad> GamepadPtr;
 typedef std::shared_ptr<SDL_Haptic> HapticPtr;
 
@@ -51,6 +54,13 @@ struct SDL_GUIDComparator {
 };
 
 typedef std::map<SDL_GUID, Controller, SDL_GUIDComparator> ControllerList;
+#else
+struct ControllerBinding {
+    int controller;
+    uint32_t button;
+};
+typedef std::map<int, int> ControllerList;
+#endif
 
 struct CtrlState {
     std::mutex mutex;

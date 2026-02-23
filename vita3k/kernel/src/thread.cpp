@@ -189,6 +189,13 @@ void ThreadState::exit_delete(bool exit) {
 
     // Wake if thread waiting on sceKernelWaitSignal
     signal.send();
+
+    // Always notify something_to_do as a fallback for stuck threads
+    something_to_do.notify_all();
+
+    // Debug: Log thread details for shutdown diagnostics
+    LOG_DEBUG("ThreadState::exit_delete: thread '{}' (id={}) signaled for removal, last_to_do={}, status={}",
+        name, id, static_cast<int>(last_to_do), static_cast<int>(status));
 }
 
 bool ThreadState::run_loop() {

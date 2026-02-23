@@ -29,7 +29,11 @@
 #include <util/fs.h>
 #include <util/log.h>
 
+#ifdef BUILD_LIBRETRO
+#include <thread>
+#else
 #include <SDL3/SDL_cpuinfo.h>
+#endif
 
 // don't use the dispatch version, because we always hash a small amount
 // with a known size
@@ -225,7 +229,11 @@ void PipelineCache::init(bool support_rasterized_order_access) {
 
     support_coherent_framebuffer_fetch = support_rasterized_order_access;
 
+#ifdef BUILD_LIBRETRO
+    const int nb_logical_threads = static_cast<int>(std::thread::hardware_concurrency());
+#else
     const int nb_logical_threads = SDL_GetNumLogicalCPUCores();
+#endif
     // took this from RPCS3 (slightly modified)
     if (nb_logical_threads > 12)
         nb_worker_threads = 6;

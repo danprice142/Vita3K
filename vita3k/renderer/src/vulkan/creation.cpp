@@ -180,7 +180,13 @@ VKRenderTarget::VKRenderTarget(VKState &state, const SceGxmRenderTargetParams &p
     color.transition_to_discard(cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);
     // depth stencil
     depthstencil.transition_to_discard(cmd_buffer, vkutil::ImageLayout::DepthStencilAttachment, vkutil::ds_subresource_range);
+#ifdef BUILD_LIBRETRO
+    if (state.libretro_lock_queue) state.libretro_lock_queue(state.libretro_queue_handle);
+#endif
     vkutil::end_single_time_command(state.device, state.general_queue, state.general_command_pool, cmd_buffer);
+#ifdef BUILD_LIBRETRO
+    if (state.libretro_unlock_queue) state.libretro_unlock_queue(state.libretro_queue_handle);
+#endif
 
     constexpr uint16_t SCE_GXM_MAX_SCENES_PER_RENDERTARGET = 8;
     // hopefully this will always be enough

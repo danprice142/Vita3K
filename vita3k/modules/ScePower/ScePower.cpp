@@ -20,7 +20,9 @@
 #include <util/tracy.h>
 #include <util/types.h>
 
+#ifndef BUILD_LIBRETRO
 #include <SDL3/SDL_power.h>
+#endif
 
 #include <climits>
 
@@ -82,22 +84,30 @@ EXPORT(int, scePowerGetBatteryFullCapacity) {
 
 EXPORT(int, scePowerGetBatteryLifePercent) {
     TRACY_FUNC(scePowerGetBatteryLifePercent);
+#ifdef BUILD_LIBRETRO
+    return 100;
+#else
     int res;
     SDL_GetPowerInfo(NULL, &res);
     if (res == -1) {
         return 100;
     }
     return res;
+#endif
 }
 
 EXPORT(int, scePowerGetBatteryLifeTime) {
     TRACY_FUNC(scePowerGetBatteryLifeTime);
+#ifdef BUILD_LIBRETRO
+    return INT_MAX;
+#else
     int res;
     SDL_GetPowerInfo(&res, NULL);
     if (res == -1) {
         return INT_MAX;
     }
     return res;
+#endif
 }
 
 EXPORT(int, scePowerGetBatteryRemainCapacity) {
@@ -107,6 +117,9 @@ EXPORT(int, scePowerGetBatteryRemainCapacity) {
 
 EXPORT(int, scePowerGetBatteryRemainLevel) {
     TRACY_FUNC(scePowerGetBatteryRemainLevel);
+#ifdef BUILD_LIBRETRO
+    return SCE_POWER_BATTERY_REMAIN_LEVEL_75_100_PERCENTS;
+#else
     int res;
     SDL_GetPowerInfo(NULL, &res);
     if (res >= 0) {
@@ -119,6 +132,7 @@ EXPORT(int, scePowerGetBatteryRemainLevel) {
     }
 
     return SCE_POWER_BATTERY_REMAIN_LEVEL_75_100_PERCENTS;
+#endif
 }
 
 EXPORT(int, scePowerGetBatteryRemainMaxLevel) {
@@ -168,24 +182,36 @@ EXPORT(int, scePowerGetUsingWireless) {
 
 EXPORT(int, scePowerIsBatteryCharging) {
     TRACY_FUNC(scePowerIsBatteryCharging);
+#ifdef BUILD_LIBRETRO
+    return 0;
+#else
     SDL_PowerState info = SDL_GetPowerInfo(NULL, NULL);
     return (info == SDL_POWERSTATE_CHARGING);
+#endif
 }
 
 EXPORT(int, scePowerIsBatteryExist) {
     TRACY_FUNC(scePowerIsBatteryExist);
+#ifdef BUILD_LIBRETRO
+    return 1;
+#else
     SDL_PowerState info = SDL_GetPowerInfo(NULL, NULL);
     return (info != SDL_POWERSTATE_NO_BATTERY);
+#endif
 }
 
 EXPORT(int, scePowerIsLowBattery) {
     TRACY_FUNC(scePowerIsLowBattery);
+#ifdef BUILD_LIBRETRO
+    return SCE_FALSE;
+#else
     int res;
     SDL_GetPowerInfo(NULL, &res);
     if (res <= LOW_BATTERY_PERCENT) {
         return SCE_TRUE;
     }
     return SCE_FALSE;
+#endif
 }
 
 EXPORT(int, scePowerIsLowBatteryInhibitUpdateDownload) {
@@ -200,8 +226,12 @@ EXPORT(int, scePowerIsLowBatteryInhibitUpdateReboot) {
 
 EXPORT(int, scePowerIsPowerOnline) {
     TRACY_FUNC(scePowerIsPowerOnline);
+#ifdef BUILD_LIBRETRO
+    return 1;
+#else
     SDL_PowerState info = SDL_GetPowerInfo(NULL, NULL);
     return ((info != SDL_POWERSTATE_UNKNOWN) && (info != SDL_POWERSTATE_ON_BATTERY));
+#endif
 }
 
 EXPORT(int, scePowerIsRequest) {

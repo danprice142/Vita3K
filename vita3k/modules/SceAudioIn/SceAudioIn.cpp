@@ -17,7 +17,9 @@
 
 #include <module/module.h>
 
+#ifndef BUILD_LIBRETRO
 #include <SDL3/SDL_audio.h>
+#endif
 #include <audio/state.h>
 #include <util/tracy.h>
 
@@ -115,6 +117,10 @@ EXPORT(int, sceAudioInInput, int port, void *destPtr) {
         return RET_ERROR(SCE_AUDIO_IN_ERROR_INVALID_PORT_PARAM);
     }
 
+#ifdef BUILD_LIBRETRO
+    memset(destPtr, 0, emuenv.audio.in_port.len_bytes);
+    return 0;
+#else
     auto to_read = emuenv.audio.in_port.len_bytes;
     do {
         auto readed = SDL_GetAudioStreamData(static_cast<SDL_AudioStream *>(emuenv.audio.in_port.id), destPtr, to_read);
@@ -126,6 +132,7 @@ EXPORT(int, sceAudioInInput, int port, void *destPtr) {
         destPtr = (char *)destPtr + readed;
     } while (to_read > 0);
     return 0;
+#endif
 }
 
 EXPORT(int, sceAudioInInputWithInputDeviceState) {
@@ -161,6 +168,11 @@ EXPORT(int, sceAudioInOpenPort, SceAudioInPortType portType, int grain, int freq
         }
     }
 
+#ifdef BUILD_LIBRETRO
+    emuenv.audio.in_port.len_bytes = grain * 2;
+    emuenv.audio.in_port.running = true;
+    return PORT_ID;
+#else
     SDL_AudioSpec desired = {
         .format = SDL_AUDIO_S16LE,
         .channels = 1,
@@ -176,6 +188,7 @@ EXPORT(int, sceAudioInOpenPort, SceAudioInPortType portType, int grain, int freq
     emuenv.audio.in_port.len_bytes = grain * 2;
     emuenv.audio.in_port.running = true;
     return PORT_ID;
+#endif
 }
 
 EXPORT(int, sceAudioInOpenPortForDiag) {
@@ -192,7 +205,9 @@ EXPORT(int, sceAudioInReleasePort, int port) {
         return RET_ERROR(SCE_AUDIO_IN_ERROR_NOT_OPENED);
     }
     emuenv.audio.in_port.running = false;
+#ifndef BUILD_LIBRETRO
     SDL_DestroyAudioStream(static_cast<SDL_AudioStream *>(emuenv.audio.in_port.id));
+#endif
     return 0;
 }
 

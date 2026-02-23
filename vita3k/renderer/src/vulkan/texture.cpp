@@ -174,7 +174,11 @@ void VKTextureCache::prepare_staging_buffer(bool is_configure) {
 
             vk::SubmitInfo submit_info{};
             submit_info.setCommandBuffers(context->cmdbuffers_to_submit);
+#ifdef BUILD_LIBRETRO
+            state.locked_queue_submit(state.general_queue, submit_info, current_fence);
+#else
             state.general_queue.submit(submit_info, current_fence);
+#endif
             context->cmdbuffers_to_submit.clear();
 
             auto result = state.device.waitForFences(current_fence, VK_TRUE, std::numeric_limits<uint64_t>::max());

@@ -118,6 +118,55 @@ static void process_batch(renderer::State &state, const FeatureState &features, 
 }
 
 void process_batches(renderer::State &state, const FeatureState &features, MemState &mem, Config &config) {
+#ifdef BUILD_LIBRETRO
+    int batches_processed = 0;
+
+    if (state.current_backend == Backend::Vulkan) {
+        // Vulkan: background thread, 500ms timeout
+        auto max_time = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() + 500;
+        while (!state.should_display) {
+            auto cmd_list = state.command_buffer_queue.top(3);
+            if (!cmd_list || !is_cmd_ready(mem, *cmd_list)) {
+                if (state.context == nullptr)
+                    return;
+                if (!cmd_list || !wait_cmd(mem, *cmd_list)) {
+                    auto curr_time = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                    if (curr_time >= max_time)
+                        return;
+                    continue;
+                }
+            }
+            state.command_buffer_queue.pop();
+            process_batch(state, features, mem, config, *cmd_list);
+            batches_processed++;
+        }
+    } else {
+        // OpenGL: main thread, 16ms timeout
+        auto max_time = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() + 16;
+
+        while (!state.should_display) {
+            auto cmd_list = state.command_buffer_queue.top(3);
+
+            if (!cmd_list || !is_cmd_ready(mem, *cmd_list)) {
+                if (state.context == nullptr)
+                    return;
+
+                if (!cmd_list || !wait_cmd(mem, *cmd_list)) {
+                    auto curr_time = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                    if (curr_time >= max_time)
+                        return;
+                    continue;
+                }
+            }
+
+            state.command_buffer_queue.pop();
+            process_batch(state, features, mem, config, *cmd_list);
+            batches_processed++;
+        }
+    }
+
+    (void)batches_processed;
+#else
     // always display a frame every 500ms
     auto max_time = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() + 500;
 
@@ -148,6 +197,7 @@ void process_batches(renderer::State &state, const FeatureState &features, MemSt
         state.command_buffer_queue.pop();
         process_batch(state, features, mem, config, *cmd_list);
     }
+#endif
 }
 
 void reset_command_list(CommandList &command_list) {
